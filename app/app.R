@@ -24,6 +24,13 @@ library(bslib)
 library(DBI)
 library(duckdb)
 library(dplyr)
+# dbplyr isn't called directly anywhere - dplyr::tbl()/collect() on a DBI
+# connection need it as a backend under the hood. rsconnect's dependency
+# scanner only bundles packages it can see referenced in the source, so
+# without this explicit library() call it's silently left out of the
+# shinyapps.io deployment (fails at runtime with "check_dbplyr(): The
+# package dbplyr is required...").
+library(dbplyr)
 library(plotly)
 library(ggplot2)
 library(scales)
