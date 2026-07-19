@@ -23,12 +23,14 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 #### Data quality notes
 
-- IRCC/IRB suppress ("--") any cell value between 0 and 5 to protect individual privacy. Suppressed cells are excluded from sums, so totals may be slightly understated and likely more so for finely-broken-down tables (e.g., by country) than coarser ones (e.g., by province), since finer tables have many more small cells to suppress.
+- IRCC/IRB suppress ("--") any cell value between 0 and 5 to protect individual privacy. Suppressed cells are excluded from sums, so totals may be slightly understated and likely more so for finely-broken-down tables (e.g., by country) than coarser ones (e.g., by province), since finer tables have many more small cells to suppress. In some cases data suppression decreases the overall total by as much as 13%.
 - The citation under each chart names the original source table(s), when they were last updated by IRCC/IRB, and when this app last accessed them.
 
 #### Source
 
 Data is pulled from the [Government of Canada Open Data Portal](https://open.canada.ca/) using the API and loaded into a local database on a periodic refresh cycle. It is not a live query against IRCC/IRB systems. See the citation under each chart for the exact source table and its last-updated date.
+
+A total of 85 distinct tables are included in the database.
 
 Note that where multiple open data tables contain equivalent information, the one with the least suppressed data was accessed. This is always the Excel file when both an Excel and CSV file exist.
 
