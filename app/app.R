@@ -158,8 +158,8 @@ ui <- page_sidebar(
     h1("Canadian Immigration Statistics Visualizer", class = "bslib-page-title navbar-brand"),
     div(
       class = "d-flex gap-2",
-      actionButton("go_about", "About", class = "btn-sm btn-outline-light"),
-      actionButton("go_plot", "Visualize", class = "btn-sm btn-outline-light")
+      actionButton("go_plot", "Visualize", class = "btn-sm btn-outline-light"),
+      actionButton("go_about", "About", class = "btn-sm btn-outline-light")
     )
   ),
   # `title` is now a tag (buttons alongside the heading), not a plain
