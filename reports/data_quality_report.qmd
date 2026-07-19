@@ -1,0 +1,287 @@
+---
+title: "Canadian Immigration Statistics — Data Quality Report"
+subtitle: "Internal-consistency checks on processed IRCC/IRB tables"
+date: today
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    fig-pos: "H"
+execute:
+  echo: false
+  warning: false
+---
+
+```{r setup}
+library(dplyr)
+library(gt)
+
+period_results <- readRDS("../data-raw/validation_period_results.rds")
+row_results <- readRDS("../data-raw/validation_row_results.rds")
+process_log <- readr::read_csv("../data-raw/process_log.csv", show_col_types = FALSE)
+
+n_tables <- process_log |> filter(status == "ok") |> nrow()
+
+all_results <- bind_rows(
+  period_results |> mutate(family = "Period (column-wise)"),
+  row_results |> mutate(family = "Row (row-wise)")
+)
+
+fmt_num <- function(x) format(round(x, 1), big.mark = ",", scientific = FALSE)
+
+# table_id is "<dataset>/<8-char-hash>__<slug>" - strip the hash and
+# truncate for display so wide gt tables don't overflow the PDF page width
+# (quarto/LaTeX silently clips columns that don't fit rather than wrapping)
+short_slug <- function(table_id, max_chars = 38) {
+  slug <- sub("^[^/]+/[a-z0-9]{8}__", "", table_id)
+  slug <- gsub("_", " ", slug)
+  ifelse(nchar(slug) > max_chars, paste0(substr(slug, 1, max_chars - 1), "…"), slug)
+}
+```
+
+## Purpose and methodology
+
+This report checks the internal arithmetic consistency of the `r n_tables`
+tidy tables produced by this project's ingest pipeline from IRCC's and
+IRB's open data. Two independent families of checks are run on every
+processed table:
+
+**Column-wise, within a row** — for a single row category (e.g. Ontario,
+Female), do its own figures add up across time?
+
+- Do a quarter's three monthly values sum to its published quarter total?
+- Do a year's monthly values sum to its published annual total (where a
+  table publishes both)?
+- Do a year's quarterly totals sum to its published annual total (where a
+  table publishes both)?
+
+**Row-wise, within a period column** — for a single point in time (e.g.
+January 2015), do a table's nested row categories add up correctly?
+
+- Do a group's detail rows (e.g. the provinces within a group) sum to the
+  group's published subtotal row?
+- Do a table's top-level subtotal rows sum to its published grand total?
+
+Row-wise checks only apply to tables with a nested row hierarchy (IRCC's
+"pivot" Excel tables); flat, already-tidy tables have nothing to check
+here since they have no subtotal rows.
+
+### Why exact equality isn't the bar
+
+IRCC and IRB round every published figure to the nearest multiple of 5,
+independently at every level of a table, and suppress ("`--`") any value
+between 0 and 5 to protect privacy. That means even a perfectly correct
+table's components essentially never sum to *exactly* their published
+total — only to within rounding and suppression noise. A check that
+required exact equality would flag nearly everything, which would be
+useless.
+
+Instead, each comparison is scored against a conservative tolerance band:
+
+$$
+\text{tolerance} = 2.5 \times (n_{\text{terms}} + 1) + 5 \times n_{\text{suppressed}}
+$$
+
+- $2.5 \times (n_{\text{terms}} + 1)$ allows for each summed component's own
+  rounding error (up to $\pm 2.5$) plus the total/subtotal cell's own
+  rounding error.
+- $5 \times n_{\text{suppressed}}$ allows for each suppressed ("`--`")
+  component, which could be as large as 5 but is treated as 0 in the
+  observed sum.
+
+A comparison is marked:
+
+- **pass** — the difference between the published total and the sum of its
+  parts is within tolerance.
+- **anomaly** — the difference exceeds tolerance, flagged for review.
+- **not checkable** — the total/subtotal cell itself is suppressed, so
+  there is nothing to compare against.
+- **not applicable** — the check doesn't apply to this table (see
+  "stock" tables below).
+
+## Overall results
+
+```{r overall-summary}
+all_results |>
+  count(family, status) |>
+  tidyr::pivot_wider(names_from = status, values_from = n, values_fill = 0) |>
+  gt() |>
+  tab_header(title = "Checks by family and outcome") |>
+  fmt_number(columns = where(is.numeric), decimals = 0, sep_mark = ",")
+```
+
+```{r check-type-summary}
+all_results |>
+  count(check_type, status) |>
+  tidyr::pivot_wider(names_from = status, values_from = n, values_fill = 0) |>
+  gt() |>
+  tab_header(title = "Checks by type and outcome")
+```
+
+```{r anomaly-rate}
+n_anomaly <- sum(all_results$status == "anomaly")
+n_checked <- sum(all_results$status %in% c("pass", "anomaly"))
+anomaly_rate <- if (n_checked > 0) round(100 * n_anomaly / n_checked, 3) else 0
+```
+
+Of `r format(n_checked, big.mark = ",")` checks where the published total
+was not itself suppressed, `r format(n_anomaly, big.mark = ",")`
+(`r anomaly_rate`%) fell outside the rounding/suppression tolerance and are
+flagged as anomalies below.
+
+## Anomalies by table
+
+```{r anomalies-by-table}
+anomaly_by_table <- all_results |>
+  filter(status == "anomaly") |>
+  mutate(dataset = sub("/.*$", "", table_id), table = short_slug(table_id)) |>
+  count(dataset, table, family, sort = TRUE) |>
+  slice_head(n = 25)
+
+if (nrow(anomaly_by_table) == 0) {
+  cat("No anomalies were flagged in any table.")
+} else {
+  anomaly_by_table |>
+    gt() |>
+    tab_header(title = "Tables with the most flagged anomalies (top 25)") |>
+    cols_label(n = "Anomalies") |>
+    cols_width(dataset ~ px(140), table ~ px(230), family ~ px(110), n ~ px(70)) |>
+    tab_options(table.font.size = 9)
+}
+```
+
+## Anomaly detail
+
+Several source tables cover the same underlying data under different
+resource names (a known gap in the manifest dedup - see the project
+README), so the same anomaly often appears identically in more than one
+processed table. The list below is deduplicated by its numeric signature
+(check type, period, published total, sum of parts) so each *distinct*
+anomaly is shown once, with a count of how many tables exhibit it and one
+example table:
+
+```{r anomaly-detail}
+detail <- all_results |>
+  filter(status == "anomaly") |>
+  mutate(excess = abs(diff) - tolerance) |>
+  group_by(check_type, period_label, total_value, sum_of_parts, diff, tolerance, excess) |>
+  summarise(n_tables = dplyr::n_distinct(table_id),
+            example_table = dplyr::first(short_slug(table_id)), .groups = "drop") |>
+  arrange(desc(excess)) |>
+  slice_head(n = 25) |>
+  transmute(
+    check_type, period_label,
+    total = fmt_num(total_value), sum_of_parts = fmt_num(sum_of_parts),
+    diff = fmt_num(diff), n_tables, example_table
+  )
+
+if (nrow(detail) == 0) {
+  cat("No anomalies to show.")
+} else {
+  detail |>
+    gt() |>
+    tab_header(title = "Largest distinct anomalies (top 25 by signature)") |>
+    cols_label(
+      check_type = "Check", period_label = "Period",
+      total = "Published total", sum_of_parts = "Sum of parts", diff = "Difference",
+      n_tables = "# tables", example_table = "Example table"
+    ) |>
+    cols_width(check_type ~ px(90), period_label ~ px(75), total ~ px(65),
+               sum_of_parts ~ px(65), diff ~ px(65), n_tables ~ px(50),
+               example_table ~ px(150)) |>
+    tab_options(table.font.size = 8)
+}
+```
+
+## Two investigated sources of anomalies
+
+Both patterns below were found by tracing the largest flagged anomalies
+back to their source spreadsheets. Both are validator-methodology
+mismatches rather than errors in IRCC's or IRB's published figures.
+
+### 1. "Valid permit" (stock) tables aren't additive across months - fixed, not just flagged
+
+```{r stock-tables}
+stock_checks <- period_results |> filter(status == "not_applicable")
+n_stock_checks <- nrow(stock_checks)
+n_stock_tables <- n_distinct(stock_checks$table_id)
+pct_of_original <- round(100 * n_stock_checks / (n_stock_checks + sum(all_results$status == "anomaly")), 1)
+```
+
+Most IRCC tables measure a *flow*: permits that became effective in a
+given month, which are naturally additive (Jan + Feb + Mar = Q1). But
+`r n_stock_tables` tables - "Study permit holders **with a valid
+permit** by province/territory..." and its siblings - measure a *stock*:
+how many permit holders had a currently-valid permit as of that month.
+Stock counts are not additive across time (the same person holding a
+valid permit in January, February, and March would be triple-counted),
+so the "Q# Total" column in these tables is not a sum of its three
+months - checking one against the other in the same way naturally
+produces a large, consistent mismatch. Spot-checking a specific
+row (Alberta / Albania, 2018 Q2) shows the mechanism directly: Apr = 15,
+May = 15, Jun = 15, **Q2 Total = 15** - the quarter figure equals each
+individual month, not their sum.
+
+This is not a data quality problem - it means the `month_to_quarter` /
+`quarter_to_year` checks simply don't apply to stock-type tables.
+Rather than guess from table titles (not every stock table's name says
+"valid permit" - two of the five affected here are older legacy exports
+that don't), `R/validate_utils.R::reclassify_stock_tables()` detects the
+pattern directly from the numbers: any table whose `month_to_quarter`
+sum-of-parts runs consistently ~3x its published total gets those checks
+relabelled **not applicable** rather than left as false-positive
+anomalies. `r format(n_stock_checks, big.mark = ",")` checks across
+`r n_stock_tables` tables were reclassified this way - without this
+fix, they would have made up `r pct_of_original`% of everything flagged
+in this report.
+
+### 2. Appended second breakdowns (row-wise)
+
+```{r doubled-grand-totals}
+gt_checks <- row_results |> filter(check_type == "grand_total")
+gt_checks <- gt_checks |> mutate(ratio = sum_of_parts / total_value)
+doubled <- gt_checks |> filter(!is.na(ratio), ratio > 1.5, ratio < 2.5)
+n_doubled_tables <- length(unique(doubled$table_id))
+```
+
+Separately, some IRCC Excel sheets append a **second, independently-grouped
+breakdown** below the main table - sharing the same grand total - rather
+than publishing it as a separate table. For example, "Work permit holders
+for Humanitarian and Compassionate purposes by gender, age..." lists a
+full gender → age breakdown first, then appends a second, flat age-only
+breakdown underneath, both summing to the same overall total. The current
+parser does not detect this second-table boundary, so it treats the
+appended rows as more members of the same row hierarchy - which
+mechanically causes a subtotal/grand-total check to see roughly double
+the true count.
+
+`r nrow(doubled)` of the `r nrow(gt_checks)` grand-total checks
+(across `r n_doubled_tables` table(s)) show almost exactly a 2x
+sum-to-total ratio, the signature of this pattern. The remaining flagged
+row-wise anomalies - particularly the elevated rate at `row_subtotal_level_1`
+and `row_subtotal_level_3` shown above - warrant a manual look against
+their source spreadsheets; some may be further instances of this same
+appended-table pattern (in tables with deeper nesting, an appended second
+breakdown surfaces at whichever row level it was inserted at, not
+necessarily level 1), and some may be genuine artifacts worth tracing
+further. This report flags them; it does not attempt to auto-correct them.
+
+## Coverage notes
+
+- `not_checkable` results (total/subtotal itself suppressed) and
+  `not_applicable` results (stock-type tables, see above) are both
+  excluded from the anomaly rate above since there is nothing to verify
+  in either case - neither is evidence of a problem.
+- Row-wise checks only run against tables with a nested row hierarchy
+  (IRCC's pivot-format Excel tables). Flat/already-tidy tables (most CSVs,
+  and both IRB tables) have no subtotal rows to check and so contribute
+  no row-wise results.
+- Column-wise year-level checks (`month_to_year`, `quarter_to_year`) only
+  run where a table actually publishes an annual total alongside its
+  monthly/quarterly breakdown, which most IRCC tables don't (the current,
+  still-in-progress year is the main exception).
+- Row-wise anomaly rates vary noticeably by nesting level (see the
+  check-type table above) - levels 2 and 4 are consistently clean while
+  levels 1 and 3 run higher, concentrated in a handful of tables rather
+  than spread evenly. That unevenness is itself a useful signal for where
+  to look first.

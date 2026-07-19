@@ -1,0 +1,13 @@
+.Rhistory
+.RData
+.Rproj.user/
+.DS_Store
+data-raw/downloads/
+data/processed/
+app/data/immigration.duckdb
+app/data/immigration.duckdb.wal
+# Regenerable via data-raw/04_validate_tables.R; the .csv forms exceed
+# GitHub's 100MB per-file limit (375MB / 133MB) so they can't be pushed
+# regardless.
+data-raw/validation_period_results.*
+data-raw/validation_row_results.*

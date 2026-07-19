@@ -1,0 +1,188 @@
+/* Custom text styling for the Canadian Immigration Statistics app.
+   Every class here targets a specific piece of on-screen text; each rule
+   restates its element's inherited Bootstrap/bslib defaults explicitly so
+   this file is the one place to look to change how any text in the app
+   looks, rather than hunting through Bootstrap/bslib/ionRangeSlider/
+   selectize defaults spread across their own stylesheets. Loaded via
+   app.R's tags$head(tags$link(href = "custom.css")) - Shiny serves
+   anything under www/ at the app's root automatically.
+
+   Several selectors below match bslib/Bootstrap's own (more specific)
+   structure rather than the bare class, because a bare single-class
+   selector here loses the cascade to theirs otherwise - e.g. bslib sets
+   `.bslib-sidebar-layout .sidebar-title` (two classes), so a plain
+   `.sidebar-title` rule here is silently ignored. Verified against the
+   live app's computed styles, not just source order. */
+
+/* App title (page_sidebar's `title =`) */
+.bslib-page-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+}
+
+/* Sidebar heading (sidebar's `title =`, e.g. "Options") - bslib scopes its
+   own font-size to `.bslib-sidebar-layout .sidebar-title`, so match that. */
+.bslib-sidebar-layout .sidebar-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+}
+
+/* Input labels (selectInput/radioButtons/sliderInput/numericInput labels,
+   e.g. "Select Theme", "Category breakdown", "Years") */
+.control-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--bs-body-color);
+}
+
+/* Radio button option text (Temporal aggregation: Monthly/Quarterly/Annual) */
+.shiny-input-radiogroup label {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--bs-body-color);
+}
+
+/* Help text below an input (sliderInput/numericInput/etc.'s helpText()) */
+.help-block {
+  font-size: 0.8rem;
+  line-height: 1.1;
+  font-weight: 200;
+  color: var(--bs-secondary-color);
+}
+
+/* Selected-value text inside a selectize dropdown (Theme, Data table,
+   Category breakdown) */
+.selectize-input {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--bs-body-color);
+}
+
+/* Option list text when a selectize dropdown is open */
+.selectize-dropdown-content .option {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--bs-body-color);
+}
+
+/* Years slider: current-range bubble/endpoint labels - ionRangeSlider's
+   shiny theme scopes these to `.irs--shiny .irs-from` etc. (two classes),
+   so match that specificity. */
+.irs--shiny .irs-single,
+.irs--shiny .irs-from,
+.irs--shiny .irs-to {
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+/* Years slider: min/max tick labels under the track - same specificity
+   note as above for the color override (font-size alone is already
+   unambiguous since only one same-specificity rule sets it). */
+.irs-grid-text,
+.irs--shiny .irs-grid-text {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+}
+
+/* Plot title (card_header, the full unabridged table_title) - bslib sets
+   its own card-header font-size/weight via `.bslib-card .card-header`,
+   so match that specificity. */
+.bslib-card .card-header {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--bs-body-color);
+}
+
+/* Source citation container (card_footer, holds the small/text-muted text
+   below the plot) - same `.bslib-card` specificity note as card-header. */
+.bslib-card .card-footer {
+  font-size: 0.8rem;
+  line-height: 1.1;
+}
+
+/* Citation text itself (the <small class="text-muted"> built by
+   table_citation_ui() in app.R) */
+.card-footer .text-muted {
+  font-size: 0.8rem;
+  font-weight: 200;
+  line-height: 1.1;
+  color: var(--bs-secondary-color);
+}
+
+/* Links within the citation (source file + dataset page links) */
+.card-footer a {
+  font-size: 0.8rem;
+  font-weight: 200;
+  line-height: 1.1;
+  color: var(--bs-primary);
+  text-decoration: underline;
+}
+
+/* Card headers (Population Pyramid, Change Over Time, Map): fill with the
+   brand red at 30% opacity. */
+.card-header {
+  background-color: rgba(213, 43, 30, 0.3);
+}
+
+/* Headers */
+.sidebar-content h5,
+.sidebar-content h6 {
+  margin-bottom: 0px;
+  padding-top: 10px;
+  padding-bottom: 0px;
+  font-family: "Noto Serif", serif;
+  font-weight: 700;
+  line-height: 1;
+}
+
+h4 {
+  padding-bottom: 0px;
+  margin-bottom: 0px;
+  color: #d52b1e;
+  font-family: "Noto Serif", serif;
+  font-weight: 600;
+}
+
+
+/* Make cards stand out more against the page background: bslib's default
+   shadow is very subtle (2-4px blur, ~15% opacity). Deepen and widen it. */
+.card {
+  box-shadow: 0 6px 16px rgba(29, 31, 33, 0.18), 0 2px 5px rgba(29, 31, 33, 0.12);
+}
+
+.navbar-static-top {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-size: 1.5rem;
+  font-family: "Noto Serif", serif;
+  font-weight: 700;
+}
+
+/* bslib sets the top bar's background via `.bslib-page-sidebar > .navbar`
+   (two classes + a child combinator), which beats a plain `.navbar-static-top`
+   rule - match that specificity to actually win the cascade. */
+.bslib-page-sidebar > .navbar.navbar-static-top {
+  background-color: #d52b1e;
+}
+
+/* Title text needs to flip to white against the red bar above - the
+   `.bslib-page-title` rule near the top of this file sets a dark
+   `var(--bs-body-color)` for use elsewhere, so override it here at higher
+   specificity to guarantee it wins regardless of source order. */
+.bslib-page-sidebar > .navbar.navbar-static-top .bslib-page-title {
+  color: #fff;
+}
+
+/* Sidebar controls: bslib lays out the sidebar as a flex column with a
+   uniform gap (--bslib-spacer, defaults to 1rem but bslib's own base CSS
+   sets it higher) between every child - that's the space appearing above
+   each pulldown, between its h6 label and the select box below it. Match
+   bslib's own selector (`.bslib-sidebar-layout > .sidebar > .sidebar-content`,
+   three combinators) to actually win the cascade, and shrink it. */
+.bslib-sidebar-layout > .sidebar > .sidebar-content {
+  --bslib-spacer: 0.5rem;
+  gap: 0.5rem;
+}

@@ -1,0 +1,272 @@
+/* Compact sidebar: bslib's default flex `gap` (1.5rem) between every control,
+   plus each <hr>'s own 2rem top/bottom margin stacked on top of that gap,
+   adds up to >100px of dead space per divider. Tighten both.
+   bslib itself sets padding-top via `.bslib-sidebar-layout>.sidebar>.sidebar-content`
+   (three class selectors = higher specificity), so match that structure here
+   or our plain `.sidebar-content.bslib-gap-spacing` rule loses the cascade. */
+.bslib-sidebar-layout > .sidebar > .sidebar-content.bslib-gap-spacing {
+  --bslib-spacer: 0.5rem;
+  gap: 0.5rem;
+  padding-top: 20px;
+}
+
+.sidebar-content hr {
+  margin: 1px 0;
+}
+
+/* Section headers within the sidebar (h5 "Scenario Options"/"Display Options",
+   h6 "Internal Migration Scenario"/"Reference Period"): Bootstrap's default
+   margin-bottom on these stacks on top of the sidebar-content flex container's
+   own 8px `gap` (flex gap doesn't collapse with child margins), doubling the
+   space below every header to 16px vs. 8px everywhere else. Zero it out so the
+   flex gap alone controls the spacing, consistent with the rest of the sidebar. */
+.sidebar-content h5,
+.sidebar-content h6 {
+  margin-bottom: 0px;
+}
+
+/* Slider input numbers (min/max endpoints, current-value bubble, tick labels):
+   smaller and bold so they read as compact data labels rather than body text.
+   ionRangeSlider's shiny theme sets font-size via the higher-specificity
+   `.irs--shiny .irs-min` etc. selectors, so match that specificity here. */
+.irs--shiny .irs-min,
+.irs--shiny .irs-max,
+.irs--shiny .irs-single,
+.irs--shiny .irs-from,
+.irs--shiny .irs-to,
+.irs-grid-text {
+  font-size: 9px;
+  font-weight: 400;
+  padding-top: 0px;
+}
+
+/* Slider and pulldown (selectInput) titles (e.g. 
+   "Internal Migration Scenario"): smaller, bold, and tighter line spacing. */
+.sidebar-content .form-group > .control-label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding-top: 0px;
+  padding-bottom: 8px;
+  margin-top: 0px;
+}
+
+/* Slider (not pulldown) titles specifically get a lighter weight than the
+   800 above - ionRangeSlider renders an `.irs` element inside the same
+   .form-group, which pulldowns (selectize) never do, so :has(.irs) reliably
+   tells the two apart without touching any R code. The extra :has() clause
+   adds specificity over the plain rule above, so this wins for sliders only. */
+.sidebar-content .form-group:has(.irs) > .control-label {
+  font-weight: 600;
+}
+
+small,
+.small {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.0;
+}
+
+/* Card headers (Population Pyramid, Change Over Time, Map): fill with the
+   brand red at 30% opacity. */
+.card-header {
+  background-color: rgba(213, 43, 30, 0.3);
+}
+
+/* Make cards stand out more against the page background: bslib's default
+   shadow is very subtle (2-4px blur, ~15% opacity). Deepen and widen it. */
+.card {
+  box-shadow: 0 6px 16px rgba(29, 31, 33, 0.18), 0 2px 5px rgba(29, 31, 33, 0.12);
+}
+
+/* Page title, card headers, and section headers (h5/h6): Noto Serif, bold.
+   None of these are real Bootstrap heading elements (.bslib-page-title is a
+   navbar-brand span, .card-header is a plain div), so app_theme.R's
+   heading_font (which only targets genuine h1-h6/.h1-.h6 via Bootstrap's own
+   $headings-font-family) doesn't reach .bslib-page-title/.card-header on its
+   own - spelled out explicitly here instead. h5/h6 do already pick up
+   heading_font's family from bslib, but not necessarily weight 700, so it's
+   set explicitly for all four selectors for one consistent, guaranteed rule.
+   .card-header needs the two-class-selector form (matching bslib's own
+   `.bslib-card .card-header` rule, which sets font-weight from a
+   --bslib-dashboard-card-header-font-weight variable defaulting to 600) -
+   a plain `.card-header` rule loses that specificity tie. */
+.bslib-card .card-header,
+h5,
+h6 {
+  font-family: "Noto Serif", serif;
+  font-weight: 700;
+  line-height: 0.9;
+}
+
+h4 {
+  padding-bottom: 0px;
+  margin-bottom: 0px;
+  color: #d52b1e;
+  font-family: "Noto Serif", serif;
+  font-weight: 600;
+}
+
+/* h5 section headers ("Scenario Options", "Display Options") in the brand
+   red, distinguishing them from h6 subheaders. */
+h5 {
+  padding-top: 0px;
+  color: #d52b1e;
+}
+
+h6 {
+  padding-top: 5px;
+}
+
+/* Maple leaf icon left of the page title (see app_ui.R, class="maple-leaf-icon"
+   on the icon()) - white so it reads against the navbar's dark background. */
+.maple-leaf-icon {
+  color: white;
+  margin-right: 0.5rem;
+}
+
+.navbar-static-top {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  font-size: 24px;
+  font-family: "Noto Serif", serif;
+  font-weight: 700;
+}
+
+
+/* Tab headers (Population Scenarios / Introduction / Data Sources and
+   Assumptions): medium weight, between the plain body text (400) and the
+   bold Noto Serif headers (700) above. Bootstrap's own `.nav-link` rule
+   (font-weight: var(--bs-nav-link-font-weight), unset so it computes to
+   inherited 400) ties on specificity with a plain `.nav-link` rule here and
+   wins on stylesheet order - `.nav-tabs .nav-link` breaks the tie. */
+.nav-tabs .nav-link {
+  font-weight: 600;
+}
+
+/* Tab bar underline: thicker and darker than Bootstrap's default 1px
+   light grey (var(--bs-border-color), #dee2e6), which reads as barely
+   visible against the page background. .nav-tabs sets its border-bottom
+   from --bs-nav-tabs-border-width/-color custom properties, so overriding
+   those (rather than border-bottom directly) lets Bootstrap's own rule
+   apply them - .tabbable .nav-tabs still needs the extra specificity to
+   beat the plain `.nav-tabs` rule on a same-specificity tie, though. */
+.tabbable .nav-tabs {
+  --bs-nav-tabs-border-width: 1px;
+  --bs-nav-tabs-border-color: #495057;
+  /* Active tab's own box border color (top/sides dark to match the
+     underline, bottom stays body-bg so it blends into the panel below) -
+     a separate variable from --bs-nav-tabs-border-color above, so it needs
+     its own override. Its width already inherits the 2px set above (the
+     active-tab rule only sets border-color, not border-width) - thickened
+     further, beyond the general underline, below. */
+  --bs-nav-tabs-link-active-border-color: #495057 #495057 var(--bs-body-bg);
+}
+
+.tabbable .nav-tabs .nav-link.active {
+  border-width: 1px;
+}
+
+/* Markdown body text (introduction.md, appendix.md)*/
+.tab-pane li,
+.tab-pane td {
+  font-size: .9rem;
+}
+
+/* Disclaimer at the bottom of the Introduction tab (disclaimer.md, wrapped
+   in this class by mod_scenario_footer_ui in mod_scenario.R): fine print,
+   smaller than the surrounding markdown body text. */
+.disclaimer-text {
+  font-size: 0.7rem;
+}
+
+/* Everything else: Noto Sans (loaded via app_theme.R's base_font). Bootstrap
+   already applies $font-family-base to <body>, and nearly everything
+   inherits it - but plotly's SVG text (axis labels, legends, tooltips) is
+   drawn in its own <svg>, which doesn't inherit page-level font-family, so
+   it needs an explicit rule to actually pick up the base font too. */
+body,
+.plotly text {
+  font-family: "Noto Sans", sans-serif;
+}
+
+/* Thin fixed footer showing app version / last-updated date. bslib's JS sets
+   an inline `style="padding:0px"` directly on <body> at runtime for this
+   fill+sidebar layout, which beats any plain stylesheet rule regardless of
+   specificity - only `!important` can override an inline style. Reserve
+   exactly the footer's height so it doesn't overlap page content. */
+body.bslib-page-fill {
+  padding-bottom: 22px !important;
+  box-sizing: border-box;
+}
+
+.app-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  line-height: 22px;
+  font-size: 11px;
+  text-align: center;
+  color: #6c757d;
+  background: #f8f9fa;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  z-index: 1030;
+}
+
+/* "Reference Scenario for Map" select, embedded top-right in the map card's
+   header (see mod_scenario.R). Bootstrap's default .form-group margin-bottom
+   would otherwise add unwanted height to the header row, so keep it compact -
+   font rendering itself (family/weight/size) is matched to the sidebar's own
+   pulldowns by the two rules below instead, rather than living here. */
+.card-header .form-group {
+  margin-bottom: 0;
+}
+
+.card-header .form-group .selectize-input {
+  min-height: unset;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* The "Reference Scenario:" label + select live inside .card-header for
+   layout, but they're a form control, not the header's own title text - so
+   they should read as regular Noto Sans body text like every other pulldown
+   in the sidebar, not inherit the card header's Noto Serif bold. Targets the
+   *visible* selectize-rendered elements (the underlying <select> is hidden
+   once selectize initializes) - .selectize-dropdown is included since it
+   stays nested inside .card-header too (selectize doesn't portal it to
+   <body> without an explicit dropdownParent option). font-weight needs
+   resetting here too, not just font-family - .bslib-card .card-header sets
+   font-weight: 700 above, which these controls would otherwise inherit. */
+.card-header label,
+.card-header select,
+.card-header .selectize-input,
+.card-header .selectize-dropdown {
+  font-family: "Noto Sans", sans-serif;
+  font-weight: 400;
+}
+
+/* Pulldown menu text, sidebar and map header alike: selectize.css's own
+   default is a flat 15px on both the closed box and the open options list.
+   Reduced here. Both contexts share one rule (rather than the map header
+   having its own smaller size) so they render identically, per request.
+   Two-class-selector form beats selectize.css's own same-specificity rule
+   regardless of stylesheet load order (see the .bslib-card .card-header
+   comment above for the same specificity-tie situation). */
+.sidebar-content .selectize-input,
+.sidebar-content .selectize-dropdown,
+.card-header .selectize-input,
+.card-header .selectize-dropdown {
+  font-size: 0.8125rem;
+}
+
+/* Plotly hover tooltips: bgcolor/bordercolor/font.color are set via
+   layout(hoverlabel = ...) in mod_scenario.R - font.weight isn't a supported
+   attribute in the bundled plotly.js (2.25), so boldface has to be a plain
+   CSS override on the actual SVG <text> element instead (unlike the hover
+   box's hand-drawn <path>, <text> does respond to CSS). */
+.hoverlayer .hovertext text {
+  font-weight: 500;
+}

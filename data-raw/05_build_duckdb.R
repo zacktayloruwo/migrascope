@@ -1,0 +1,123 @@
+# Load every tidy long table in data/processed/ into a DuckDB database
+# (data/immigration.duckdb) for the Shiny app to query: a unified `facts`
+# table (see R/duckdb_utils.R for the normalization) plus a `catalog` table
+# describing each table's dimensions and available temporal granularities.
+#
+# Safe to re-run: replaces both tables each time. Takes a few minutes -
+# dominated by the same handful of 500k+ row tables as data-raw/04.
+
+library(dplyr)
+source("R/duckdb_utils.R")
+
+process_log <- readr::read_csv("data-raw/process_log.csv", show_col_types = FALSE)
+manifest <- readr::read_csv("data-raw/manifest.csv", show_col_types = FALSE,
+                             col_types = readr::cols(last_modified_ckan = "c"))
+hash_to_title <- manifest |>
+  mutate(hash = substr(resource_id, 1, 8)) |>
+  select(hash, table_name) |>
+  distinct(hash, .keep_all = TRUE)
+
+ok_tables <- process_log |> filter(status == "ok")
+
+# rpd_decisions and rpd_1997_2021 are normalized individually below like
+# any other table (so their own Province of Residence / Country of
+# Persecution breakdowns stay browsable), *and* combined into one extra
+# "by Outcome, 1997-2026" table - see R/duckdb_utils.R::build_refugees_table().
+# All three end up under the "refugees" dataset/theme (relabeled below)
+# since geography aside, they're the same subject.
+refugee_source_slugs <- ok_tables |>
+  filter(dataset %in% c("rpd_decisions", "rpd_1997_2021")) |>
+  select(dataset, slug) |>
+  tibble::deframe()
+
+title_for_slug <- function(slug) {
+  parts <- strsplit(slug, "__")[[1]]
+  hash <- parts[1]
+  base_title <- hash_to_title$table_name[match(hash, hash_to_title$hash)]
+  if (is.na(base_title)) base_title <- gsub("_", " ", slug)
+  if (length(parts) >= 3) {
+    sheet_suffix <- tools::toTitleCase(gsub("_", " ", parts[length(parts)]))
+    base_title <- paste0(base_title, " — ", sheet_suffix)
+  }
+  base_title
+}
+
+cli::cli_h1("Normalizing {nrow(ok_tables)} tables for DuckDB")
+
+results <- purrr::pmap(ok_tables |> select(dataset, slug), function(dataset, slug) {
+  path <- fs::path("data", "processed", dataset, paste0(slug, "_long.csv"))
+  table_id <- paste(dataset, slug, sep = "/")
+  title <- title_for_slug(slug)
+
+  long <- tryCatch(
+    readr::read_csv(path, show_col_types = FALSE,
+                     col_types = readr::cols(
+                       is_row_subtotal = "l", is_period_subtotal = "l",
+                       suppressed = "l", is_percent = "l", value = "d",
+                       period_year = "i", period_quarter = "i", period_month = "i",
+                       period_label = "c",
+                       level_1 = "c", level_2 = "c", level_3 = "c", level_4 = "c", level_5 = "c",
+                       row_label_raw = "c"
+                     )),
+    error = function(e) e
+  )
+  if (inherits(long, "error")) {
+    cli::cli_alert_danger("Could not read {path}: {conditionMessage(long)}")
+    return(NULL)
+  }
+  if ("row_level" %in% names(long)) long$row_level <- as.integer(long$row_level)
+
+  tryCatch(normalize_table(long, table_id, dataset, title), error = function(e) {
+    cli::cli_alert_danger("Could not normalize {table_id}: {conditionMessage(e)}")
+    NULL
+  })
+}, .progress = "Normalizing")
+
+results <- lapply(results, function(r) {
+  if (!is.null(r) && r$catalog_row$dataset %in% c("rpd_decisions", "rpd_1997_2021")) {
+    r$catalog_row$dataset <- "refugees"
+  }
+  r
+})
+
+if (all(c("rpd_decisions", "rpd_1997_2021") %in% names(refugee_source_slugs))) {
+  refugees_result <- tryCatch(
+    build_refugees_table(refugee_source_slugs[["rpd_decisions"]], refugee_source_slugs[["rpd_1997_2021"]]),
+    error = function(e) {
+      cli::cli_alert_danger("Could not build merged refugees table: {conditionMessage(e)}")
+      NULL
+    }
+  )
+  results <- c(results, list(refugees_result))
+} else {
+  cli::cli_alert_warning("rpd_decisions and/or rpd_1997_2021 missing from process_log - skipping refugees merge")
+}
+
+results <- purrr::compact(results)
+facts <- purrr::map(results, "facts") |> bind_rows()
+catalog <- purrr::map(results, "catalog_row") |> bind_rows()
+
+cli::cli_alert_success("{nrow(catalog)} tables normalized, {format(nrow(facts), big.mark = ',')} total rows")
+
+# Written straight into app/data/ (not data/) - that directory is the
+# self-contained Shiny app bundle deployed to shinyapps.io, so its data
+# inputs live there rather than being copied over from a top-level data/
+# as a separate step.
+db_path <- "app/data/immigration.duckdb"
+fs::dir_create("app/data")
+if (fs::file_exists(db_path)) fs::file_delete(db_path)
+
+con <- DBI::dbConnect(duckdb::duckdb(), db_path)
+DBI::dbWriteTable(con, "facts", facts)
+DBI::dbWriteTable(con, "catalog", catalog)
+DBI::dbExecute(con, "CREATE INDEX idx_facts_table_id ON facts(table_id)")
+DBI::dbExecute(con, "CREATE INDEX idx_facts_period_type ON facts(period_type)")
+DBI::dbDisconnect(con, shutdown = TRUE)
+
+# app.R's source-citation feature reads a copy of the manifest from its own
+# data/ directory rather than reaching into data-raw/ at runtime - keep it
+# in sync here, right alongside the duckdb it's cited against.
+fs::file_copy("data-raw/manifest.csv", "app/data/source_manifest.csv", overwrite = TRUE)
+cli::cli_alert_info("Wrote app/data/source_manifest.csv")
+
+cli::cli_alert_info("Wrote {db_path}")
