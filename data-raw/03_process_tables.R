@@ -53,6 +53,34 @@ write_table <- function(dataset, slug, res) {
 
 irb_datasets_local <- c("rpd_decisions", "rpd_1997_2021")
 
+# The four "French-Speaking Permanent Residents by Province/Territory and
+# <X>" workbooks (Age Group / CMA / Gender / Immigration Category) each
+# redundantly embed the exact same "PR - PT" (province-total-only) sheet
+# alongside their own unique breakdown - confirmed identical year-by-year
+# totals across all four, not just a name coincidence (see README's "Known
+# limitations"). Keep that sheet from exactly one of them (the Age Group
+# workbook) and skip it in the other three so it doesn't end up in the
+# catalog four times over.
+DUPLICATE_SHEETS <- list(
+  list(
+    sheet_name = "PR - PT",
+    keep_from  = "2bd7ddf5-f914-4c60-8cae-87b7b3391805", # Age Group workbook
+    skip_from  = c(
+      "d034c26c-2dda-456d-b5ba-aeb705353131", # CMA workbook
+      "f257263f-09e3-4ce7-b67d-2977981cbaf0", # Gender workbook
+      "d839c522-7e47-4df6-8d5d-bf39f25f70eb"  # Immigration Category workbook
+    )
+  )
+)
+
+#' TRUE if `resource_id`/`sheet` is a known duplicate that should be
+#' skipped in favour of its canonical copy from a sibling workbook.
+is_duplicate_sheet <- function(resource_id, sheet) {
+  any(vapply(DUPLICATE_SHEETS, function(d) {
+    identical(sheet, d$sheet_name) && resource_id %in% d$skip_from
+  }, logical(1)))
+}
+
 process_one <- function(dataset, resource_id, table_name, format) {
   path <- find_downloaded_file(dataset, resource_id)
   # prefix with a short resource-id fragment: table names are frequently
@@ -102,6 +130,13 @@ process_one <- function(dataset, resource_id, table_name, format) {
 
   purrr::map(sheets, function(s) {
     sheet_slug <- if (length(sheets) == 1) base_slug else paste0(base_slug, "__", slugify(s, 30))
+
+    if (is_duplicate_sheet(resource_id, s)) {
+      return(tibble::tibble(dataset = dataset, slug = sheet_slug, status = "skipped_duplicate_sheet",
+                             n_long_rows = NA_integer_, n_wide_rows = NA_integer_,
+                             n_wide_cols = NA_integer_, error = NA_character_))
+    }
+
     res <- tryCatch(process_pivot_sheet(path, s), error = function(e) e)
     if (inherits(res, "error")) {
       return(tibble::tibble(dataset = dataset, slug = sheet_slug, status = "error",

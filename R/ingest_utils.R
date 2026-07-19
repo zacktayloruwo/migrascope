@@ -75,11 +75,19 @@ discover_cic_monthly_update_datasets <- function() {
 }
 
 #' Strip a leading bracketed note (e.g. "[rounded numbers - not for
-#' calculations] ") and collapse whitespace/dash variants so that the same
-#' table published in multiple formats groups under one key.
+#' calculations] "), collapse whitespace/dash/comma variants, and normalize
+#' "resident"/"residents", so that the same table published under two
+#' slightly different names (case, punctuation, singular/plural) groups
+#' under one key instead of silently surviving as two separate resources.
+#' Found via a post-hoc audit of the built catalog: two pairs of tables
+#' turned out to hold the same data under names this function didn't yet
+#' collapse - see README's "Known limitations" for the two exact titles and
+#' how their values were confirmed to match before adding these rules.
 normalize_table_key <- function(name) {
   name <- sub("^\\[[^]]*\\]\\s*", "", name)
   name <- gsub("[–—]", "-", name) # en/em dash -> hyphen
+  name <- gsub(",", "", name) # serial-comma variants ("X, Y and Z" vs "X, Y, and Z")
+  name <- gsub("residents?\\b", "resident", name, ignore.case = TRUE) # singular/plural
   name <- gsub("\\s+", " ", name)
   tolower(trimws(sub("\\.$", "", name)))
 }
