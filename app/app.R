@@ -169,7 +169,25 @@ ui <- page_sidebar(
   theme = bs_theme(version = 5, primary = "#0b4f6c",
                     base_font = font_google("Noto Sans"),
                     heading_font = font_google("Noto Serif")),
-  tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")),
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+    # Highlights whichever of the two nav buttons matches the current
+    # main_view panel by swapping its Bootstrap variant (outline <->
+    # solid) - done via a tiny custom message rather than re-rendering
+    # the buttons through renderUI, which would reset their click
+    # counters and risk spurious observeEvent() firings.
+    tags$script(HTML("
+      Shiny.addCustomMessageHandler('setActiveNav', function(active) {
+        var buttons = {plot: document.getElementById('go_plot'), about: document.getElementById('go_about')};
+        Object.keys(buttons).forEach(function(key) {
+          var btn = buttons[key];
+          if (!btn) return;
+          btn.classList.toggle('btn-light', key === active);
+          btn.classList.toggle('btn-outline-light', key !== active);
+        });
+      });
+    "))
+  ),
   sidebar = sidebar(
     width = 340,
     h6("Select Theme"),
@@ -215,6 +233,13 @@ ui <- page_sidebar(
 server <- function(input, output, session) {
   observeEvent(input$go_about, nav_select("main_view", selected = "about", session = session))
   observeEvent(input$go_plot, nav_select("main_view", selected = "plot", session = session))
+
+  # Fires on every panel switch, including the initial one at page load,
+  # so the "active" button styling (see the setActiveNav JS handler in
+  # the UI) always matches whichever panel is actually showing.
+  observeEvent(input$main_view, {
+    session$sendCustomMessage("setActiveNav", input$main_view)
+  })
 
   cat_d <- reactive({
     req(input$theme)
