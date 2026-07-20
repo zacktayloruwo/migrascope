@@ -575,7 +575,16 @@ derive_series_label <- function(table_title, dataset, level_labels) {
   # function wants exactly the opposite: keep those (they're what makes a
   # Series option distinguishable), only strip the dimension text that's
   # now surfaced via Geographic Aggregation/Break down by instead.
-  x <- sub("\\s*[—-]\\s*[A-Z][a-z]+(\\s[A-Za-z]+){0,3}\\s*$", "", x)
+  #
+  # Also deliberately does NOT strip a trailing "— Pr Pt X"-style
+  # multi-sheet disambiguator the way simplify_table_label() does - for
+  # THAT function it's noise, but here it's frequently the *only* thing
+  # distinguishing several same-hash sheets of one source workbook at
+  # different drill-down depths (e.g. permanent_residents/d839c522's four
+  # sheets - "— Pr Pt Immcat", "— Pr Immcat", "— Pr Immcat g", "— Pr
+  # Immcat m" - three of which share an identical geo+category signature
+  # and would otherwise all derive the exact same series_label, making
+  # them indistinguishable in the Series selector).
   x <- sub("^Open Dataset Request \\d+ (ENG|FRA)\\s*-?\\s*", "", x)
   x <- sub("^Canada\\s*\\(excluding Quebec\\)\\s*[-–]\\s*", "", x)
   x <- sub("^Canada\\s+ex-QC\\s*[-–]\\s*", "", x)
@@ -590,15 +599,23 @@ derive_series_label <- function(table_title, dataset, level_labels) {
     x <- gsub(names(GENERAL_ABBREV)[i], GENERAL_ABBREV[i], x, ignore.case = TRUE, perl = TRUE)
   }
 
-  # level labels may now appear in `x` either verbatim or already
-  # abbreviated by the GENERAL_ABBREV pass above (e.g. "Province/
-  # Territory" -> "P/T") - strip both forms
-  abbreviated_labels <- level_labels
+  # Strip the *normalized* (normalize_category_label(), decorator-free)
+  # form of each level label, not the raw form - a raw label like
+  # "Immigration Category — Pr Pt Immcat" appears in the title verbatim
+  # (title_for_slug() appended that exact decorator when building the
+  # title for this sheet), so stripping the raw label would remove the
+  # decorator suffix right along with the dimension name - exactly the
+  # bit that's needed to tell same-signature sibling sheets apart in the
+  # Series selector (see the derive_series_label() doc comment above).
+  # Also strip the GENERAL_ABBREV-abbreviated form (e.g. "Province/
+  # Territory" -> "P/T"), since the title may already be abbreviated.
+  normalized_labels <- vapply(level_labels, normalize_category_label, character(1), USE.NAMES = FALSE)
+  abbreviated_labels <- normalized_labels
   for (i in seq_along(GENERAL_ABBREV)) {
     abbreviated_labels <- gsub(names(GENERAL_ABBREV)[i], GENERAL_ABBREV[i], abbreviated_labels,
                                 ignore.case = TRUE, perl = TRUE)
   }
-  strip_labels <- unique(c(level_labels, abbreviated_labels))
+  strip_labels <- unique(c(normalized_labels, abbreviated_labels))
   strip_labels <- strip_labels[!is.na(strip_labels) & nzchar(strip_labels)]
   for (lbl in strip_labels) {
     # ignore.case + fixed can't be combined in base R (fixed silently wins,
@@ -669,7 +686,78 @@ build_theme_dimension_map <- function(catalog, series_label_lookup = character()
     )
   })
 
-  do.call(rbind, rows)
+  dedupe_series_labels(do.call(rbind, rows))
+}
+
+#' Guarantee series_label is unique within each theme (dataset) - not just
+#' within a single Geo/Category combination's candidate set. Two tables
+#' that never actually appear together in today's Series selector (because
+#' they answer different Geo/Category combinations) can still share a
+#' derive_series_label() result - e.g. plain "Permanent Residents" comes
+#' out of a dozen different tables that simply have no distinguishing
+#' population/program qualifier to keep (see derive_series_label()) - and
+#' leaving those as exact duplicates is confusing to anyone scanning the
+#' full list, not just a functional bug in the one narrower case where two
+#' duplicates *do* share a combination (that narrower case was the actual
+#' "data cycles" bug - two candidates in the same dropdown were visually
+#' indistinguishable and picking "the same" option again could silently
+#' select the other one's data - fixed at the source by no longer
+#' stripping the multi-sheet disambiguator suffix in derive_series_label(),
+#' but this pass guarantees the *stronger* "no dupes at all" property
+#' regardless of whether a future table addition would otherwise bring two
+#' currently-non-colliding duplicates into the same dropdown).
+#'
+#' Disambiguates using each table's own geo_ranks/categories - the same
+#' vocabulary a user already sees in Geographic Aggregation/Break down by,
+#' so the qualifier is informative rather than arbitrary (e.g. "Permanent
+#' Residents (Age Group)" vs "Permanent Residents (Gender)") - and only
+#' falls back to a bare numeric suffix in the rare case that doesn't
+#' resolve every collision (e.g. two duplicates sharing the exact same
+#' geo/category set too).
+dedupe_series_labels <- function(dim_map) {
+  for (ds in unique(dim_map$dataset)) {
+    idx <- which(dim_map$dataset == ds)
+    seen <- character(0)
+    for (i in idx) {
+      lbl <- dim_map$series_label[i]
+      if (!nzchar(lbl) || !(lbl %in% seen)) {
+        seen <- c(seen, lbl)
+        next
+      }
+
+      qualifiers <- c(unlist(dim_map$categories[i]), unlist(dim_map$geo_ranks[i]))
+      # ignore.case + fixed can't be combined in base R (fixed silently
+      # wins, case-sensitively) - lower-case both sides instead, since
+      # qualifier text (e.g. "Intended Occupation (NOC 2011)") can contain
+      # regex metacharacters that fixed=FALSE would misinterpret
+      qualifiers <- qualifiers[nzchar(qualifiers) &
+                                  !vapply(qualifiers, function(q) grepl(tolower(q), tolower(lbl), fixed = TRUE),
+                                          logical(1))]
+      # try each candidate qualifier in turn (not just the first) before
+      # falling back to a numeric suffix - two different duplicates can
+      # otherwise both reach for the same first-choice qualifier (e.g. two
+      # geo-only tables both listing "PT" first in geo_ranks), needlessly
+      # forcing the second one into an uninformative "(2)" when a
+      # perfectly good second-choice qualifier (e.g. "CD") was available.
+      new_lbl <- lbl
+      for (q in qualifiers) {
+        candidate <- paste0(lbl, " (", q, ")")
+        if (!(candidate %in% seen)) {
+          new_lbl <- candidate
+          break
+        }
+      }
+
+      suffix <- 2
+      while (new_lbl %in% seen) {
+        new_lbl <- paste0(lbl, " (", suffix, ")")
+        suffix <- suffix + 1
+      }
+      dim_map$series_label[i] <- new_lbl
+      seen <- c(seen, new_lbl)
+    }
+  }
+  dim_map
 }
 
 #' Filter a theme's dimension-map rows (see build_theme_dimension_map()) to
