@@ -167,6 +167,49 @@ table_has_subtotals <- function(con, table_id) {
   nrow(hit) > 0
 }
 
+#' True leaf rows for one table: rows with no deeper *child* row sharing
+#' their exact level_1..level_k prefix - not simply `row_level == n_levels`
+#' (what fetch_leaf_rows() used to filter on directly). Some pivot tables
+#' are ragged: one branch of the hierarchy is broken down further than
+#' others (e.g. IMP "Agreements" permits get a further FTA-type split
+#' that "Canadian Interests"/"Vulnerable workers" permits never do), so
+#' the *deepest available* row for a branch can sit at a row_level well
+#' short of the table's overall n_levels. Naively requiring
+#' `row_level == n_levels` silently drops every such shallower branch
+#' entirely - this was discovered via a Suppressed Residual close to 100%
+#' of the published total: the "missing" data wasn't suppressed at all,
+#' it was sitting at a row_level the query never looked at.
+#'
+#' Built bottom-up: row_level == n_levels rows are always leaves (no
+#' deeper level exists); for each shallower row_level k (from n_levels-1
+#' down to 1), a real (non-grand-total - level_1 is never NA for a
+#' genuine group's own subtotal) subtotal row is promoted to a leaf only
+#' if no row at row_level == k+1 shares its exact level_1..level_k
+#' prefix. Excluding the grand-total row (level_1 IS NA) from promotion
+#' matters: its own "children" are the level_1 subtotals via a NULL-vs-
+#' NULL comparison SQL never treats as a match, which would otherwise
+#' promote the entire-table grand total into the leaf set and massively
+#' double-count everything.
+true_leaf_rows <- function(con, table_id, n_levels) {
+  base <- dplyr::tbl(con, "facts") |> dplyr::filter(.data$table_id == !!table_id)
+  leaves <- base |> dplyr::filter(.data$row_level == !!n_levels)
+
+  if (n_levels > 1) {
+    for (k in seq(n_levels - 1, 1)) {
+      level_cols <- paste0("level_", seq_len(k))
+      rows_k <- base |>
+        dplyr::filter(.data$row_level == !!k, !is.na(.data[[level_cols[1]]]))
+      children_prefixes <- base |>
+        dplyr::filter(.data$row_level == !!(k + 1)) |>
+        dplyr::select(dplyr::all_of(level_cols)) |>
+        dplyr::distinct()
+      uncovered <- rows_k |> dplyr::anti_join(children_prefixes, by = level_cols)
+      leaves <- dplyr::union_all(leaves, uncovered)
+    }
+  }
+  leaves
+}
+
 #' Pull the finest-grain leaf rows for one table from DuckDB: the deepest
 #' row level (no double-counting from subtotal rows) and the finest
 #' available time grain (month if the table has one, else year). Keeps
@@ -195,10 +238,8 @@ fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_mont
   period_type_filter <- if (isTRUE(has_month)) "month" else "year"
   level_cols <- paste0("level_", seq_len(n_levels))
 
-  base <- dplyr::tbl(con, "facts") |>
+  base <- true_leaf_rows(con, table_id, n_levels) |>
     dplyr::filter(
-      .data$table_id == !!table_id,
-      .data$row_level == !!n_levels,
       .data$period_type == !!period_type_filter,
       .data$period_year >= !!year_range[1],
       .data$period_year <= !!year_range[2]
