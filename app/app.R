@@ -186,6 +186,48 @@ ui <- page_sidebar(
           btn.classList.toggle('btn-outline-light', key !== active);
         });
       });
+
+      // Generalizes the same pattern for the Geographic Aggregation button
+      // row: greys out (native `disabled`, not just styling) whichever
+      // ranks aren't available for the current table, highlights the
+      // selected one, and pushes the server-chosen default back into
+      // input.geo_level itself (not just visual state) - the server drives
+      // this on every table switch since these are plain HTML buttons, not
+      // a native Shiny input with its own default.
+      Shiny.addCustomMessageHandler('setGeoButtons', function(msg) {
+        var buttons = {
+          national: document.getElementById('geo_btn_national'),
+          PT: document.getElementById('geo_btn_pt'),
+          CMA: document.getElementById('geo_btn_cma'),
+          CD: document.getElementById('geo_btn_cd'),
+          CSD: document.getElementById('geo_btn_csd')
+        };
+        Object.keys(buttons).forEach(function(key) {
+          var btn = buttons[key];
+          if (!btn) return;
+          var available = msg.available.indexOf(key) !== -1;
+          btn.disabled = !available;
+          btn.classList.toggle('btn-light', key === msg.selected);
+          btn.classList.toggle('btn-outline-secondary', key !== msg.selected);
+        });
+        Shiny.setInputValue('geo_level', msg.selected, {priority: 'event'});
+      });
+      // :not(:disabled) is re-checked live against the DOM at click time
+      // (this is a single delegated handler, not re-bound per button), so
+      // a button disabled by an earlier setGeoButtons message correctly
+      // blocks clicks even though this listener was registered once.
+      // Restyles immediately client-side on click rather than waiting on a
+      // server round-trip through setGeoButtons - that message still owns
+      // the *disabled* state (only the server knows what's available) and
+      // still fires on a table switch to reset styling to National.
+      $(document).on('click', '.geo-agg-btn:not(:disabled)', function() {
+        var rank = this.dataset.rank;
+        document.querySelectorAll('.geo-agg-btn').forEach(function(btn) {
+          btn.classList.toggle('btn-light', btn.dataset.rank === rank);
+          btn.classList.toggle('btn-outline-secondary', btn.dataset.rank !== rank);
+        });
+        Shiny.setInputValue('geo_level', rank, {priority: 'event'});
+      });
     "))
   ),
   sidebar = sidebar(
@@ -196,8 +238,33 @@ ui <- page_sidebar(
     selectInput("table", NULL, choices = NULL),
     h6("Temporal aggregation"),
     radioButtons("granularity", NULL, choices = "Annual"),
-    h6("Category breakdown"),
-    selectInput("level", NULL, choices = c("Total (no breakdown)" = "total")),
+    h6("Geographic Aggregation"),
+    div(
+      class = "d-flex flex-wrap gap-1 mb-2",
+      tags$button("National", id = "geo_btn_national", type = "button",
+                  class = "btn btn-sm geo-agg-btn btn-light", `data-rank` = "national"),
+      tags$button("Province/Territory", id = "geo_btn_pt", type = "button",
+                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "PT"),
+      tags$button("CMA", id = "geo_btn_cma", type = "button",
+                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CMA"),
+      tags$button("CD", id = "geo_btn_cd", type = "button",
+                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CD"),
+      tags$button("CSD", id = "geo_btn_csd", type = "button",
+                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CSD")
+    ),
+    conditionalPanel(
+      "input.geo_level != 'national'",
+      h6("Geographic unit"),
+      selectizeInput("geo_unit", NULL, choices = c("All" = "All"), options = list(server = TRUE))
+    ),
+    conditionalPanel(
+      "input.geo_level == 'national' || input.geo_unit != 'All'",
+      h6("Break down by"),
+      selectInput("cat_level", NULL, choices = c("None" = "none"))
+    ),
+    h6("Display as"),
+    radioButtons("display_as", NULL,
+                 choices = c("Absolute Values" = "absolute", "Percentage of Total" = "percent")),
     h6("Year Range"),
     sliderInput("years", NULL, min = 2000, max = 2026, value = c(2015, 2026), sep = ""),
     h6("Max categories shown (rest grouped as ‘Other’)"),
@@ -263,6 +330,25 @@ server <- function(input, output, session) {
     m
   })
 
+  # Classifies the current table's levels once per table switch (geographic
+  # rank per level, or filler, or a real non-geo category) - shared by the
+  # UI-population observer below, the Geographic-unit repopulation observer,
+  # and plot_data(), so the messy label-text regex matching (classify_level()
+  # in app_utils.R) only runs once per table, not once per reactive consumer.
+  level_classification <- reactive({
+    m <- current_meta()
+    labels <- unlist(m[, c("level_1_label", "level_2_label", "level_3_label",
+                            "level_4_label", "level_5_label")])
+    idx <- which(!is.na(labels))
+    cl <- classify_level(unname(labels[idx]))
+    cl$level_index <- idx
+    cl
+  })
+
+  has_subtotals_current <- reactive({
+    table_has_subtotals(con, current_meta()$table_id)
+  })
+
   observeEvent(current_meta(), {
     m <- current_meta()
 
@@ -270,42 +356,95 @@ server <- function(input, output, session) {
     updateRadioButtons(session, "granularity", choices = granularity_choices,
                         selected = utils::tail(granularity_choices, 1))
 
-    level_labels <- unlist(m[, c("level_1_label", "level_2_label", "level_3_label",
-                                  "level_4_label", "level_5_label")])
-    level_labels <- level_labels[!is.na(level_labels)]
-    level_choices <- c("total", seq_along(level_labels))
-    names(level_choices) <- c("Total (no breakdown)", unname(level_labels))
-    updateSelectInput(session, "level", choices = level_choices,
-                       selected = if (length(level_labels) >= 1) "1" else "total")
+    cl <- level_classification()
+    available_ranks <- unique(stats::na.omit(cl$geo_rank))
+    session$sendCustomMessage("setGeoButtons",
+                               list(available = c("national", available_ranks), selected = "national"))
+
+    cat_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
+    cat_choices <- c("none", as.character(cat_rows$level_index))
+    names(cat_choices) <- c("None", cat_rows$label)
+    updateSelectInput(session, "cat_level", choices = cat_choices,
+                       selected = if (nrow(cat_rows) >= 1) cat_choices[[2]] else "none")
 
     updateSliderInput(session, "years", min = m$min_year, max = m$max_year,
                        value = c(m$min_year, m$max_year))
   })
 
+  # Only reacts to the Geographic Aggregation *rank* changing (clicks, or
+  # the server-driven reset to "national" on a table switch via
+  # setGeoButtons above) - repopulates the Geographic unit picker for that
+  # rank and resets it to "All". Kept separate from the current_meta()
+  # observer above since it also needs to fire on a plain rank click, not
+  # just a table switch.
+  observeEvent(input$geo_level, {
+    if (identical(input$geo_level, "national")) {
+      updateSelectizeInput(session, "geo_unit", choices = c("All" = "All"), selected = "All", server = TRUE)
+      return()
+    }
+    m <- current_meta()
+    cl <- level_classification()
+    idx <- cl$level_index[match(input$geo_level, cl$geo_rank)]
+    if (is.na(idx)) {
+      updateSelectizeInput(session, "geo_unit", choices = c("All" = "All"), selected = "All", server = TRUE)
+      return()
+    }
+    units <- list_geo_units(con, m$table_id, m$n_levels, input$geo_level, idx)
+    updateSelectizeInput(session, "geo_unit", choices = units, selected = "All", server = TRUE)
+  }, ignoreInit = TRUE)
+
   plot_data <- reactive({
     m <- current_meta()
-    req(input$granularity, input$level, input$years, input$top_n)
+    req(input$granularity, input$years, input$top_n, input$geo_level)
     # guard against a stale granularity selection lingering mid-update
     valid_granularity <- if (isTRUE(m$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
     req(input$granularity %in% valid_granularity)
 
-    level_label <- if (!identical(input$level, "total")) {
-      m[[paste0("level_", input$level, "_label")]]
+    cl <- level_classification()
+    geo_unit <- input$geo_unit %||% "All"
+    cat_level <- input$cat_level %||% "none"
+    geo_real <- !identical(input$geo_level, "national")
+    geo_all_units <- identical(geo_unit, "All")
+
+    # Routing rule: geography is the chart's fill dimension only when a
+    # real rank is picked AND no specific unit narrows it - otherwise
+    # Break down by (or "none"/Total) is the fill, and a specific unit (if
+    # any) becomes a row filter instead. Exactly one axis is ever the fill;
+    # never both, never faceted.
+    category_level <- if (geo_real && geo_all_units) {
+      as.character(cl$level_index[match(input$geo_level, cl$geo_rank)])
     } else {
+      cat_level
+    }
+    category_level_label <- if (identical(category_level, "none") || identical(category_level, "total")) {
       NULL
+    } else {
+      m[[paste0("level_", category_level, "_label")]]
     }
 
+    filter_prefix <- if (geo_real && !geo_all_units) parse_geo_unit(geo_unit) else character(0)
+    filter_level <- length(filter_prefix)
+
     build_plot_data(
-      con, table_id = m$table_id, n_levels = m$n_levels, level = input$level,
+      con, table_id = m$table_id, n_levels = m$n_levels, level = category_level,
       granularity = input$granularity, year_range = input$years,
       is_stock = m$is_stock, top_n = input$top_n, has_month = m$has_month,
-      level_label = level_label
+      level_label = category_level_label,
+      filter_level = if (filter_level > 0) filter_level else NULL,
+      filter_values = if (filter_level > 0) filter_prefix else NULL,
+      has_subtotals = has_subtotals_current(),
+      display_as = input$display_as %||% "absolute"
     )
   })
 
   output$plot_title <- renderText({
     m <- current_meta()
     title <- m$table_title
+    geo_unit <- input$geo_unit %||% "All"
+    if (!identical(input$geo_level, "national") && !identical(geo_unit, "All")) {
+      place <- utils::tail(parse_geo_unit(geo_unit), 1)
+      title <- paste0(title, " — ", place)
+    }
     if (isTRUE(m$is_stock)) {
       title <- paste(title, "— point-in-time snapshot, not summed across months")
     }
@@ -322,6 +461,8 @@ server <- function(input, output, session) {
     validate(need(nrow(d) > 0, "No data for this selection."))
 
     single_series <- nlevels(d$category) <= 1
+    is_percent <- identical(input$display_as, "percent")
+    value_fmt <- if (is_percent) function(v) paste0(round(v, 1), "%") else comma
 
     # Monthly x-axis labels are too dense to all fit without overlapping -
     # thin them to every 3rd period (quarterly spacing).
@@ -334,11 +475,11 @@ server <- function(input, output, session) {
 
     p <- ggplot(d, aes(
       x = period_display, y = value, fill = category,
-      text = paste0(period_display, "<br>", category, ": ", comma(value))
+      text = paste0(period_display, "<br>", category, ": ", value_fmt(value))
     )) +
       geom_col(position = "stack") +
       scale_x_discrete(breaks = x_breaks) +
-      scale_y_continuous(labels = comma) +
+      scale_y_continuous(labels = if (is_percent) function(v) paste0(v, "%") else comma) +
       labs(x = NULL, y = NULL, fill = NULL) +
       theme_bw() +
       theme(

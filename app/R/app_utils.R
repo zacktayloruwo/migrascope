@@ -33,6 +33,134 @@ PROVINCE_ABBR <- c(
 #' Province/Territory (checked against the catalog when this was written).
 CENSUS_GEO_LABELS <- c("Census Division", "Census Subdivision")
 
+#' Fixed colour for the "Suppressed Residual" pseudo-category (see
+#' build_plot_data()) - distinct from OTHER_COLOR so it's never confused
+#' with the "Other" bucket; "Other" folds together real, known values,
+#' while this segment represents values IRCC/IRB never published at all.
+SUPPRESSED_COLOR <- "#b0413e"
+
+#' Ordered regex -> geographic-rank lookup, most-specific-first (mirrors
+#' GENERAL_ABBREV's "(CMA)" before bare "Census Metropolitan Area"
+#' ordering below). A level's label rarely matches a concept's canonical
+#' spelling exactly - the catalog has 10+ variants of "Province/Territory"
+#' alone (slash/no-slash/spaced-slash, "of Intended Destination"/"of
+#' Claim" suffixes, the "P/T" abbreviation, ...) - so this is substring/
+#' regex matching, not exact lookup. "Census Division" is never a
+#' substring of "Census Subdivision" (no space before "Division" in
+#' "Subdivision"), so CD and CSD don't need special-casing against each
+#' other.
+GEO_RANK_PATTERNS <- c(
+  "Census Subdivision" = "CSD",
+  "Census Division" = "CD",
+  "Census Metropolitan Area|\\bCMA\\b" = "CMA",
+  "Province\\s*/?\\s*Territory|\\bP/T\\b" = "PT"
+)
+
+#' Vectorized: which geographic rank (if any) a level_N_label describes.
+#' NA for non-geographic labels (Gender, Immigration Category, ...) and for
+#' generic filler labels (see FILLER_LEVEL_REGEX) - those never contain any
+#' of the patterns above.
+classify_geo_rank <- function(label) {
+  rank <- rep(NA_character_, length(label))
+  for (i in seq_along(GEO_RANK_PATTERNS)) {
+    hit <- is.na(rank) & grepl(names(GEO_RANK_PATTERNS)[i], label, ignore.case = TRUE, perl = TRUE)
+    rank[hit] <- GEO_RANK_PATTERNS[i]
+  }
+  rank
+}
+
+#' Generic, semantically-empty level labels produced when the title-parsing
+#' fallback (guess_level_labels() in R/duckdb_utils.R) or a flat table's own
+#' literal column names (e.g. "program_level_2") run out of real dimension
+#' names to report. Excluded entirely from the "Break down by" selector -
+#' picking one would produce a real data split with no way to explain what
+#' it actually represents.
+FILLER_LEVEL_REGEX <- "^(Category|Program) Level \\d+$"
+
+#' Classify a table's level_N_label vector (in level order, NAs already
+#' dropped by the caller) for the Geographic Aggregation / Break down by
+#' selectors: for each label, is it geographic (and at what rank), or a
+#' meaningless filler, or a real non-geographic category. Returns a
+#' data.frame aligned by position with the input.
+classify_level <- function(label) {
+  data.frame(
+    label = label,
+    geo_rank = classify_geo_rank(label),
+    is_filler = grepl(FILLER_LEVEL_REGEX, label, ignore.case = TRUE),
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Separator joining a Geographic unit's ancestor prefix values into one
+#' selectize option value (see list_geo_units()/parse_geo_unit()) - the
+#' Unicode "unit separator" control character, chosen because it will never
+#' appear in a real place name.
+GEO_UNIT_SEP <- "␟"
+
+#' List the distinct places available at one geographic rank for a table,
+#' for the "Geographic unit" selectize in app.R. Always includes "All"
+#' first. CMA/CD/CSD names recur across provinces (e.g. more than one
+#' "Division No. 1"), so for those ranks the option *value* encodes the
+#' full level_1..level_<geo_level_idx> ancestor prefix (joined with
+#' GEO_UNIT_SEP) rather than the bare name alone - both to disambiguate
+#' same-named places in the picker itself and so the value round-trips
+#' straight into an exact-prefix filter (parse_geo_unit(), used by
+#' fetch_leaf_rows()/fetch_published_total()). The *display* label gets
+#' the same ", <province abbreviation>" treatment fetch_leaf_rows() already
+#' applies when showing CD/CSD as the chart's category, for the same
+#' disambiguation reason. Provinces are ordered west-to-east
+#' (PROVINCE_ORDER_WEST_TO_EAST) when geo_rank == "PT"; other ranks sort by
+#' display label.
+list_geo_units <- function(con, table_id, n_levels, geo_rank, geo_level_idx) {
+  level_cols <- paste0("level_", seq_len(geo_level_idx))
+  d <- dplyr::tbl(con, "facts") |>
+    dplyr::filter(.data$table_id == !!table_id, .data$row_level == !!n_levels) |>
+    dplyr::select(dplyr::all_of(level_cols)) |>
+    dplyr::distinct() |>
+    dplyr::collect()
+  d <- d[stats::complete.cases(d), , drop = FALSE]
+  if (nrow(d) == 0) return(c("All" = "All"))
+
+  unit_value <- do.call(paste, c(as.list(d[level_cols]), sep = GEO_UNIT_SEP))
+  place <- d[[geo_level_idx]]
+  display <- if (geo_level_idx == 1) {
+    place
+  } else {
+    abbr <- PROVINCE_ABBR[d[[1]]]
+    ifelse(!is.na(abbr), paste0(place, ", ", abbr), place)
+  }
+
+  ord <- if (identical(geo_rank, "PT")) {
+    order(match(display, PROVINCE_ORDER_WEST_TO_EAST, nomatch = length(PROVINCE_ORDER_WEST_TO_EAST) + 1L))
+  } else {
+    order(display)
+  }
+  c("All" = "All", stats::setNames(unit_value[ord], display[ord]))
+}
+
+#' Split a Geographic unit selectize value back into its level_1..level_k
+#' ancestor prefix values (see list_geo_units()). "All"/NULL/empty means no
+#' unit filter is in effect.
+parse_geo_unit <- function(geo_unit) {
+  if (is.null(geo_unit) || identical(geo_unit, "All") || !nzchar(geo_unit)) {
+    character(0)
+  } else {
+    strsplit(geo_unit, GEO_UNIT_SEP, fixed = TRUE)[[1]]
+  }
+}
+
+#' TRUE if this table has any IRCC/IRB-published subtotal rows at all
+#' (pivot-shaped tables only - flat tables never carry them, see
+#' fetch_published_total()). Checked live per table switch; cheap given
+#' the existing idx_facts_table_id index.
+table_has_subtotals <- function(con, table_id) {
+  hit <- dplyr::tbl(con, "facts") |>
+    dplyr::filter(.data$table_id == !!table_id, .data$is_row_subtotal == TRUE) |>
+    utils::head(1) |>
+    dplyr::collect()
+  nrow(hit) > 0
+}
+
 #' Pull the finest-grain leaf rows for one table from DuckDB: the deepest
 #' row level (no double-counting from subtotal rows) and the finest
 #' available time grain (month if the table has one, else year). Keeps
@@ -48,7 +176,16 @@ CENSUS_GEO_LABELS <- c("Census Division", "Census Subdivision")
 #' these names recur across provinces (more than one "Windsor"), so without
 #' this, same-named places in different provinces would silently merge
 #' into one category.
-fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_month, level_label = NULL) {
+#'
+#' `filter_level`/`filter_values` (optional) narrow the query to one exact
+#' geographic ancestor prefix - the "Geographic unit" picker in app.R
+#' turning geography into a *filter* rather than the display category (see
+#' the `category_level` routing rule in app.R's `plot_data` reactive). This
+#' is independent of `level`/`category`: a unit filter can be in effect
+#' while a completely different (non-geographic) level is chosen as
+#' `category`.
+fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_month, level_label = NULL,
+                             filter_level = NULL, filter_values = NULL) {
   period_type_filter <- if (isTRUE(has_month)) "month" else "year"
   level_cols <- paste0("level_", seq_len(n_levels))
 
@@ -61,7 +198,15 @@ fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_mont
       .data$period_year <= !!year_range[2]
     )
 
-  base <- if (identical(level, "total")) {
+  if (!is.null(filter_level) && filter_level > 0) {
+    for (i in seq_len(filter_level)) {
+      col <- paste0("level_", i)
+      val <- filter_values[i]
+      base <- base |> dplyr::filter(.data[[col]] == !!val)
+    }
+  }
+
+  base <- if (identical(level, "total") || identical(level, "none")) {
     base |> dplyr::mutate(category = "Total")
   } else {
     lvl_col <- paste0("level_", level)
@@ -73,15 +218,98 @@ fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_mont
                    "period_month", "value") |>
     dplyr::collect()
 
-  if (!identical(level, "total") && isTRUE(level_label %in% CENSUS_GEO_LABELS) && "level_1" %in% names(d)) {
+  if (!identical(level, "total") && !identical(level, "none") &&
+      isTRUE(level_label %in% CENSUS_GEO_LABELS) && "level_1" %in% names(d)) {
     abbr <- PROVINCE_ABBR[d$level_1]
     d$category <- ifelse(!is.na(abbr), paste0(d$category, ", ", abbr), d$category)
   }
 
   # build the true leaf entity key in plain R - simpler and more portable
   # than translating a dynamic-width paste() into SQL via dbplyr
-  d$entity_id <- do.call(paste, c(as.list(d[level_cols]), sep = ""))
+  d$entity_id <- do.call(paste, c(as.list(d[level_cols]), sep = ""))
   d[c("entity_id", "category", "period_year", "period_quarter", "period_month", "value")]
+}
+
+#' Fetch the "real" (IRCC/IRB-published) total for one table/period/place,
+#' for the Suppressed Residual (see build_plot_data()). Reuses the same
+#' parent-subtotal matching pattern R/validate_utils.R's row-consistency
+#' checks already rely on: a group's own published subtotal sits at
+#' `row_level == <depth of that group's own dimension prefix>`, flagged
+#' `is_row_subtotal == TRUE`, with `level_1..level_<depth>` holding that
+#' group's own values (`level_1` is `NA` for the grand total, which always
+#' sits at `row_level == 1`). `prefix_level`/`prefix_values` (0/empty for
+#' the grand total) work exactly like `fetch_leaf_rows()`'s `filter_level`/
+#' `filter_values`. A stock table's subtotal row is already a single
+#' per-month aggregate (unlike leaf rows, no per-entity dedup is needed),
+#' so the latest available month within the target quarter/year is taken
+#' directly; a flow table's subtotal sums across months in the target
+#' period, same as leaf rows. Returns `NULL` if no matching subtotal rows
+#' exist for the requested filter/year range (callers should check
+#' `table_has_subtotals()` once per table before relying on this).
+fetch_published_total <- function(con, table_id, prefix_level, prefix_values, year_range,
+                                   has_month, is_stock, granularity) {
+  period_type_filter <- if (isTRUE(has_month)) "month" else "year"
+
+  base <- dplyr::tbl(con, "facts") |>
+    dplyr::filter(
+      .data$table_id == !!table_id,
+      .data$is_row_subtotal == TRUE,
+      .data$row_level == !!max(prefix_level, 1),
+      .data$period_type == !!period_type_filter,
+      .data$period_year >= !!year_range[1],
+      .data$period_year <= !!year_range[2]
+    )
+
+  base <- if (prefix_level == 0) {
+    base |> dplyr::filter(is.na(.data$level_1))
+  } else {
+    for (i in seq_len(prefix_level)) {
+      col <- paste0("level_", i)
+      val <- prefix_values[i]
+      base <- base |> dplyr::filter(.data[[col]] == !!val)
+    }
+    base
+  }
+
+  d <- base |>
+    dplyr::select("period_year", "period_quarter", "period_month", "value") |>
+    dplyr::collect()
+  if (nrow(d) == 0) return(NULL)
+
+  if (granularity == "Monthly") {
+    out <- d |>
+      dplyr::group_by(.data$period_year, .data$period_month) |>
+      dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop") |>
+      dplyr::mutate(period_display = sprintf("%d-%02d", .data$period_year, .data$period_month))
+  } else if (granularity == "Quarterly" && "period_quarter" %in% names(d) && !all(is.na(d$period_quarter))) {
+    if (isTRUE(is_stock)) {
+      out <- d |>
+        dplyr::group_by(.data$period_year, .data$period_quarter) |>
+        dplyr::slice_max(.data$period_month, n = 1, with_ties = FALSE) |>
+        dplyr::ungroup() |>
+        dplyr::transmute(.data$period_year, .data$period_quarter, published_total = .data$value)
+    } else {
+      out <- d |>
+        dplyr::group_by(.data$period_year, .data$period_quarter) |>
+        dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
+    }
+    out <- out |> dplyr::mutate(period_display = sprintf("%d Q%d", .data$period_year, .data$period_quarter))
+  } else {
+    if (isTRUE(is_stock)) {
+      out <- d |>
+        dplyr::group_by(.data$period_year) |>
+        dplyr::slice_max(.data$period_month, n = 1, with_ties = FALSE) |>
+        dplyr::ungroup() |>
+        dplyr::transmute(.data$period_year, published_total = .data$value)
+    } else {
+      out <- d |>
+        dplyr::group_by(.data$period_year) |>
+        dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
+    }
+    out <- out |> dplyr::mutate(period_display = as.character(.data$period_year))
+  }
+
+  out |> dplyr::select("period_display", "published_total")
 }
 
 #' Roll the finest-grain leaf rows up to the requested granularity.
@@ -191,15 +419,17 @@ order_categories <- function(cat_totals_desc) {
 }
 
 #' Build a name -> colour mapping for a set of ordered category factor
-#' levels: "Other" is always OTHER_COLOR regardless of position, the rest
-#' are drawn from a fixed gradient in level order.
+#' levels: "Other" is always OTHER_COLOR and "Suppressed Residual" is
+#' always SUPPRESSED_COLOR regardless of position, the rest are drawn from
+#' a fixed gradient in level order.
 category_colors <- function(levels_in_order) {
-  non_other <- setdiff(levels_in_order, "Other")
+  non_other <- setdiff(levels_in_order, c("Other", "Suppressed Residual"))
   pal <- grDevices::colorRampPalette(
     c("#0b4f6c", "#1d7874", "#679436", "#a5be00", "#e2c044", "#e58606", "#cc503e")
   )(length(non_other))
   colors <- stats::setNames(pal, non_other)
   if ("Other" %in% levels_in_order) colors[["Other"]] <- OTHER_COLOR
+  if ("Suppressed Residual" %in% levels_in_order) colors[["Suppressed Residual"]] <- SUPPRESSED_COLOR
   colors[levels_in_order]
 }
 
@@ -355,15 +585,76 @@ simplify_table_label <- function(table_title, dataset) {
   x
 }
 
-#' End-to-end: fetch, aggregate, cap categories, and order both axes for
-#' plotting (periods chronologically; categories west-to-east for
-#' province/territory breakdowns, otherwise by ascending total value; see
-#' order_categories()).
+#' Convert absolute values to % of total per period, for Display as =
+#' "Percentage of Total". No special-casing needed for whether a
+#' Suppressed Residual segment is present: by the time this runs, the
+#' residual (when computable) has already been folded into `d` as its own
+#' row (see build_plot_data()), so summing everything currently in `d` for
+#' a period already gives the right denominator either way - the real
+#' published total when the residual is present, or just the visible sum
+#' when it isn't.
+to_percent_of_total <- function(d) {
+  if (nrow(d) == 0) return(d)
+  # base ifelse()'s result length follows its *condition*, not its "yes"
+  # branch - with a per-group scalar condition (sum(...) > 0) that
+  # silently truncates the whole vectorized division to one recycled
+  # value. dplyr::if_else() doesn't have that gotcha, but still needs the
+  # group total materialized as its own (per-row-recycled) column first,
+  # not recomputed inline, so both branches stay properly elementwise.
+  d |>
+    dplyr::group_by(.data$period_display) |>
+    dplyr::mutate(
+      period_total = sum(.data$value, na.rm = TRUE),
+      value = dplyr::if_else(.data$period_total > 0, 100 * .data$value / .data$period_total, 0)
+    ) |>
+    dplyr::select(-"period_total") |>
+    dplyr::ungroup()
+}
+
+#' End-to-end: fetch, aggregate, cap categories, append the Suppressed
+#' Residual (if computable), convert to percentages (if requested), and
+#' order both axes for plotting (periods chronologically; categories
+#' west-to-east for province/territory breakdowns, otherwise by ascending
+#' total value; see order_categories()).
+#'
+#' `filter_level`/`filter_values`: optional geographic ancestor-prefix
+#' filter (see fetch_leaf_rows()) - independent of `level`, which is
+#' whichever level is currently the display category.
+#' `has_subtotals`: from `table_has_subtotals()`, gates whether a
+#' Suppressed Residual is attempted at all (flat tables never have one).
+#' `display_as`: `"absolute"` (default) or `"percent"`.
 build_plot_data <- function(con, table_id, n_levels, level, granularity, year_range, is_stock, top_n,
-                             has_month, level_label = NULL) {
-  raw <- fetch_leaf_rows(con, table_id, n_levels, level, year_range, has_month, level_label)
+                             has_month, level_label = NULL, filter_level = NULL, filter_values = NULL,
+                             has_subtotals = FALSE, display_as = "absolute") {
+  raw <- fetch_leaf_rows(con, table_id, n_levels, level, year_range, has_month, level_label,
+                         filter_level, filter_values)
   agg <- aggregate_series(raw, granularity, is_stock)
+
+  # Suppressed Residual: the real published total for this same filter
+  # context, minus the sum actually visible *before* any top-N collapsing
+  # - top-N/"Other" is a display simplification, not a data limitation, so
+  # it must not affect how much residual there "should" be.
+  residual_rows <- NULL
+  if (isTRUE(has_subtotals) && nrow(agg) > 0) {
+    published <- fetch_published_total(
+      con, table_id, prefix_level = filter_level %||% 0, prefix_values = filter_values %||% character(0),
+      year_range = year_range, has_month = has_month, is_stock = is_stock, granularity = granularity
+    )
+    if (!is.null(published)) {
+      visible_totals <- agg |>
+        dplyr::group_by(.data$period_display, .data$period_sort) |>
+        dplyr::summarise(visible_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
+      residual_rows <- dplyr::inner_join(published, visible_totals, by = "period_display") |>
+        dplyr::mutate(value = pmax(0, .data$published_total - .data$visible_total)) |>
+        dplyr::filter(.data$value > 0) |>
+        dplyr::transmute(category = "Suppressed Residual", .data$period_display, .data$period_sort, .data$value)
+    }
+  }
+
   capped <- collapse_to_top_n(agg, top_n)
+  if (!is.null(residual_rows) && nrow(residual_rows) > 0) {
+    capped <- dplyr::bind_rows(capped, residual_rows)
+  }
   if (nrow(capped) == 0) return(capped)
 
   period_levels <- capped |>
@@ -372,16 +663,21 @@ build_plot_data <- function(con, table_id, n_levels, level, granularity, year_ra
     dplyr::pull(.data$period_display)
 
   cat_totals_desc <- capped |>
+    dplyr::filter(.data$category != "Suppressed Residual") |>
     dplyr::group_by(.data$category) |>
     dplyr::summarise(total = sum(.data$value, na.rm = TRUE), .groups = "drop") |>
     dplyr::arrange(dplyr::desc(.data$total))
   level_order <- order_categories(cat_totals_desc)
+  if ("Suppressed Residual" %in% capped$category) level_order <- c(level_order, "Suppressed Residual")
 
-  capped |>
+  out <- capped |>
     dplyr::mutate(
       period_display = factor(.data$period_display, levels = period_levels),
       category = factor(.data$category, levels = level_order)
     )
+
+  if (identical(display_as, "percent")) out <- to_percent_of_total(out)
+  out
 }
 
 #' Pull the 8-char hash prefix out of a table_id ("dataset/hash__slug") -

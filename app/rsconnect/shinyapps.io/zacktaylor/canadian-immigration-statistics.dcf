@@ -5,8 +5,6 @@ account: zacktaylor
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 17623899
-bundleId: 12290014
+bundleId: 12290160
 url: https://zacktaylor.shinyapps.io/canadian-immigration-statistics/
 version: 1
-asMultiple: FALSE
-asStatic: FALSE
