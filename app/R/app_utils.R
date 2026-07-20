@@ -444,6 +444,220 @@ category_colors <- function(levels_in_order) {
 #' null-coalesce is simpler than adding a dependency for one operator.
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+#' Genuinely-redundant tables to drop before building the per-theme
+#' dimension map (see build_theme_dimension_map()) - each is superseded by
+#' a sibling table with the identical geography+category signature, the
+#' same `is_stock`, and equal-or-wider year coverage (verified against the
+#' real catalog/facts data, not just title text - see the plan history for
+#' the research behind this list). Not a general dedup mechanism: most
+#' same-signature "duplicates" elsewhere in the catalog are genuinely
+#' different series (stock vs flow, population/program subset, or a
+#' distinct externally-normalized metric like "Percentage of French
+#' Speaking..." tables) and must stay independently selectable - see
+#' derive_series_label()/build_theme_dimension_map().
+EXCLUDED_DUPLICATE_TABLE_IDS <- c(
+  # superseded by study_permit_holders/d3702eb4 (same PT+Study Level
+  # series, 2015-2026 vs this one's narrower 2015-2022)
+  "study_permit_holders/5d3a238a__canada_study_permit_holders_by_province_territory_of_intende",
+  # superseded by asylum_claimants/450f7e37 (identical PT+Claim Office
+  # Type coverage, more detail retained)
+  "asylum_claimants/13d02e73__canada_asylum_claimants_by_claim_office_type_province_territ",
+  # superseded by asylum_claimants/46bee0ae (same PT+Age series,
+  # 2015-2026 vs this one's narrower 2015-2025)
+  "asylum_claimants/bdac348b__canada_asylum_claimants_by_province_territory_of_claim_age_a",
+  # superseded by asylum_claimants/34c502f9 (identical PT+Gender
+  # coverage, more detail retained)
+  "asylum_claimants/ec417b64__canada_asylum_claimants_by_province_territory_of_claim_gende",
+  # superseded by permanent_residents/81021dfd (identical CMA+PT
+  # coverage, more detail retained)
+  "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma"
+)
+
+#' Decorator suffixes that dress up an otherwise-identical non-geographic
+#' category label across different tables of the same theme (found during
+#' the per-theme dimension map research - e.g. "Immigration Category — Pr
+#' Pt Immcat" vs plain "Immigration Category"). Stripped so the "Break down
+#' by" selector can treat both as the same category. Deliberately
+#' conservative: this does NOT attempt to merge differently-worded concepts
+#' (e.g. "Country of Birth" is never treated as the same thing as "Country
+#' of Citizenship") - only known decorative noise is removed.
+CATEGORY_LABEL_DECORATORS <- c(
+  # trailing "— Pr Pt X"/"— Pr X" (X spanning 1+ words) always runs to the
+  # end of the label in every observed case (e.g. "Immigration Category —
+  # Pr Pt Immcat", "Immigration Category — Pr Immcat g") - safe to strip
+  # from "Pr" onward rather than trying to match the variable word count
+  "\\s*[—-]\\s*Pr\\s+.*$" = "",
+  "\\s+Main Category\\s*$" = ""
+)
+
+#' Normalize a non-geographic category label for cross-table matching
+#' within a theme (see build_theme_dimension_map()) - strips
+#' CATEGORY_LABEL_DECORATORS, case preserved (matching is done
+#' case-insensitively by callers).
+normalize_category_label <- function(label) {
+  x <- label
+  for (i in seq_along(CATEGORY_LABEL_DECORATORS)) {
+    x <- gsub(names(CATEGORY_LABEL_DECORATORS)[i], CATEGORY_LABEL_DECORATORS[i], x, ignore.case = TRUE, perl = TRUE)
+  }
+  trimws(x)
+}
+
+#' Derive a short "Series" label distinguishing tables that otherwise share
+#' the same theme/geography/category signature (see
+#' build_theme_dimension_map()) - the opposite operation from
+#' simplify_table_label(): that function keeps the breakdown text and
+#' drops boilerplate; this one drops the breakdown text (now surfaced via
+#' separate selectors) and keeps whatever's left - population/program
+#' qualifiers ("French-Speaking", "Humanitarian & Compassionate"),
+#' precomputed-metric qualifiers ("Percentage of..."), or snapshot
+#' qualifiers ("on December 31st") that make it a genuinely different
+#' series. Returns "" when nothing distinguishing survives (the common
+#' case - most tables need no Series label at all, see `series_needed` in
+#' app.R). A human-curated `series_label` column in
+#' data/table_short_labels.xlsx overrides this per-table when the
+#' automatic result reads awkwardly (mirrors how `short_label` already
+#' works - see table_short_labels() in app.R).
+derive_series_label <- function(table_title, dataset, level_labels) {
+  x <- table_title
+
+  # same leading-subject stripping simplify_table_label() does - but
+  # deliberately NOT THEME_BOILERPLATE, which exists specifically to strip
+  # population/program qualifiers ("French-Speaking Permanent Residents",
+  # "Percentage of...") from the old "Select Data table" short label. This
+  # function wants exactly the opposite: keep those (they're what makes a
+  # Series option distinguishable), only strip the dimension text that's
+  # now surfaced via Geographic Aggregation/Break down by instead.
+  x <- sub("\\s*[—-]\\s*[A-Z][a-z]+(\\s[A-Za-z]+){0,3}\\s*$", "", x)
+  x <- sub("^Open Dataset Request \\d+ (ENG|FRA)\\s*-?\\s*", "", x)
+  x <- sub("^Canada\\s*\\(excluding Quebec\\)\\s*[-–]\\s*", "", x)
+  x <- sub("^Canada\\s+ex-QC\\s*[-–]\\s*", "", x)
+  x <- sub("^Canada\\s*[-–]\\s*", "", x)
+  x <- sub("^Quebec\\s*[-–]\\s*", "", x)
+
+  # GENERAL_ABBREV is dataset-independent connector/phrase cleanup (e.g.
+  # "and year in which permit(s) became effective" -> "", "on December
+  # 31st" -> "(Dec 31)") - safe to run since it doesn't touch population
+  # qualifiers, only makes what's left more compact.
+  for (i in seq_along(GENERAL_ABBREV)) {
+    x <- gsub(names(GENERAL_ABBREV)[i], GENERAL_ABBREV[i], x, ignore.case = TRUE, perl = TRUE)
+  }
+
+  # level labels may now appear in `x` either verbatim or already
+  # abbreviated by the GENERAL_ABBREV pass above (e.g. "Province/
+  # Territory" -> "P/T") - strip both forms
+  abbreviated_labels <- level_labels
+  for (i in seq_along(GENERAL_ABBREV)) {
+    abbreviated_labels <- gsub(names(GENERAL_ABBREV)[i], GENERAL_ABBREV[i], abbreviated_labels,
+                                ignore.case = TRUE, perl = TRUE)
+  }
+  strip_labels <- unique(c(level_labels, abbreviated_labels))
+  strip_labels <- strip_labels[!is.na(strip_labels) & nzchar(strip_labels)]
+  for (lbl in strip_labels) {
+    # ignore.case + fixed can't be combined in base R (fixed silently wins,
+    # case-sensitively) - escape regex metacharacters instead so this can
+    # run case-insensitively via perl=TRUE
+    escaped <- gsub("([.\\|()\\[\\]{}^$*+?])", "\\\\\\1", lbl, perl = TRUE)
+    x <- gsub(escaped, "", x, ignore.case = TRUE, perl = TRUE)
+  }
+
+  x <- sub("^\\s*By\\s+", "", x, ignore.case = TRUE)
+  x <- gsub("\\bby\\b", "", x, ignore.case = TRUE, perl = TRUE)
+  x <- gsub("\\band\\b", "", x, ignore.case = TRUE, perl = TRUE)
+  x <- gsub("[,()]", " ", x)
+  x <- gsub("\\s+", " ", x)
+  x <- trimws(x)
+  x <- sub("\\.$", "", x)
+  if (nchar(x) > 0) substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+
+  if (nchar(x) < 3) "" else x
+}
+
+#' Build the per-table dimension map every Geo/Category/Series selector in
+#' app.R is driven from - one row per surviving table_id (after dropping
+#' EXCLUDED_DUPLICATE_TABLE_IDS), with:
+#'  - `geo_ranks`: list-column, the set of geographic ranks (CSD/CD/CMA/PT)
+#'    this table has (via classify_geo_rank())
+#'  - `categories`: list-column, the set of *normalized*
+#'    (normalize_category_label()) non-geographic, non-filler category
+#'    labels this table has
+#'  - `classification`: list-column, this table's full classify_level()
+#'    output (label/geo_rank/is_filler) with `level_index` attached - the
+#'    same shape app.R's old level_classification() reactive used to
+#'    compute per-table on every reactive tick; precomputed once here
+#'    instead
+#'  - `series_label`: from `series_label_lookup` (keyed by table_id - see
+#'    table_short_labels()'s identical pattern for `short_label`) if
+#'    present and non-empty, else derive_series_label()
+#' Computed once at app startup (like `catalog` itself), not per-session.
+build_theme_dimension_map <- function(catalog, series_label_lookup = character()) {
+  catalog <- catalog[!catalog$table_id %in% EXCLUDED_DUPLICATE_TABLE_IDS, , drop = FALSE]
+
+  level_label_cols <- c("level_1_label", "level_2_label", "level_3_label", "level_4_label", "level_5_label")
+
+  rows <- lapply(seq_len(nrow(catalog)), function(i) {
+    row <- catalog[i, , drop = FALSE]
+    labels <- unlist(row[, level_label_cols])
+    idx <- which(!is.na(labels))
+    cl <- classify_level(unname(labels[idx]))
+    cl$level_index <- idx
+    cl$label_normalized <- normalize_category_label(cl$label)
+
+    cat_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
+
+    series_label <- unname(series_label_lookup[row$table_id])
+    if (is.na(series_label) || !nzchar(trimws(series_label))) {
+      series_label <- derive_series_label(row$table_title, row$dataset, unname(labels[idx]))
+    }
+
+    data.frame(
+      dataset = row$dataset, table_id = row$table_id, table_title = row$table_title,
+      n_levels = row$n_levels, has_month = row$has_month, is_stock = row$is_stock,
+      min_year = row$min_year, max_year = row$max_year,
+      geo_ranks = I(list(unique(stats::na.omit(cl$geo_rank)))),
+      categories = I(list(unique(cat_rows$label_normalized))),
+      classification = I(list(cl)),
+      series_label = series_label,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+#' Filter a theme's dimension-map rows (see build_theme_dimension_map()) to
+#' those consistent with the current Geographic Aggregation/Geographic
+#' unit/Break down by selection, using the same two-mode fill-vs-filter
+#' rule app.R's `category_level_r()` already applies to routing a single
+#' resolved table's levels - extended here to routing *which table* first:
+#'  - geography-is-fill (`geo_level` real, `geo_unit` == "All"): candidates
+#'    are rows whose `geo_ranks` contains `geo_level`; `cat_level` doesn't
+#'    constrain (Break down by is hidden in this mode in app.R already).
+#'  - category-is-fill (`geo_level` == "national", or a specific
+#'    `geo_unit` is picked): candidates are rows whose `categories`
+#'    contains `cat_level` (skipped if `cat_level == "none"`); if a
+#'    specific `geo_unit` is also active, additionally require `geo_ranks`
+#'    contains `geo_level`, since the geo filter and the category fill
+#'    need to be two different levels of the *same* table.
+#' Returns the matching subset of `rows` (0, 1, or several - several means
+#' a genuine Series ambiguity remains, see app.R's `series_candidates()`).
+match_candidates <- function(rows, geo_level, geo_unit, cat_level) {
+  geo_real <- !identical(geo_level, "national")
+  geo_all_units <- identical(geo_unit %||% "All", "All")
+
+  if (geo_real && geo_all_units) {
+    keep <- vapply(rows$geo_ranks, function(s) geo_level %in% s, logical(1))
+  } else {
+    keep <- rep(TRUE, nrow(rows))
+    if (!identical(cat_level %||% "none", "none")) {
+      keep <- keep & vapply(rows$categories, function(s) cat_level %in% s, logical(1))
+    }
+    if (geo_real && !geo_all_units) {
+      keep <- keep & vapply(rows$geo_ranks, function(s) geo_level %in% s, logical(1))
+    }
+  }
+  rows[keep, , drop = FALSE]
+}
+
 #' Split the single "temporary_workers" catalog dataset into two themes -
 #' International Mobility Program (IMP) and Temporary Foreign Worker
 #' Program (TFWP) - so each gets its own tab instead of forcing users to
