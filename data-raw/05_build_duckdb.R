@@ -80,6 +80,32 @@ results <- lapply(results, function(r) {
   r
 })
 
+# A handful of catalog rows have level_N_label fields that don't match the
+# real data in `facts` at all - a title-parsing bug in guess_level_labels()
+# (see R/duckdb_utils.R) that misattributes which label belongs to which
+# column. Confirmed by checking actual distinct values in the affected
+# columns, not just title text - e.g. permanent_residents/840a3387's
+# level_1_label said "Country of Birth" but level_1's real values were
+# Male/Female; level_2_label said "Gender" but level_2's real values were
+# country names (a user noticed this live: picking "Break down by = Country
+# of Birth" plotted Gender). Corrected here as a targeted, documented
+# override rather than fixing guess_level_labels() itself, which would need
+# to correctly parse this table's specific source title structure - same
+# spirit as the dataset relabel just above.
+LEVEL_LABEL_CORRECTIONS <- list(
+  "permanent_residents/840a3387__canada_adoptions_via_permanent_residence_fc6_fc9_by_country_" =
+    c(level_1_label = "Gender", level_2_label = "Country of Birth")
+)
+
+results <- lapply(results, function(r) {
+  if (is.null(r)) return(r)
+  fix <- LEVEL_LABEL_CORRECTIONS[[r$catalog_row$table_id]]
+  if (!is.null(fix)) {
+    for (col in names(fix)) r$catalog_row[[col]] <- fix[[col]]
+  }
+  r
+})
+
 if (all(c("rpd_decisions", "rpd_1997_2021") %in% names(refugee_source_slugs))) {
   refugees_result <- tryCatch(
     build_refugees_table(refugee_source_slugs[["rpd_decisions"]], refugee_source_slugs[["rpd_1997_2021"]]),
@@ -94,6 +120,36 @@ if (all(c("rpd_decisions", "rpd_1997_2021") %in% names(refugee_source_slugs))) {
 }
 
 results <- purrr::compact(results)
+
+# Genuinely-redundant tables, dropped entirely rather than just hidden by
+# the app - each is superseded by a sibling table with the identical
+# geography+category signature, the same is_stock, and equal-or-wider year
+# coverage (verified against real catalog/facts data, not just title text).
+# Not a general dedup mechanism: most same-signature "duplicates" elsewhere
+# in the catalog are genuinely different series (stock vs flow, population/
+# program subset, or a distinct externally-normalized metric like
+# "Percentage of French Speaking..." tables) and must stay independently
+# selectable - see the Shiny app's derive_series_label()/
+# build_theme_dimension_map() (app/R/app_utils.R).
+EXCLUDED_DUPLICATE_TABLE_IDS <- c(
+  # superseded by study_permit_holders/d3702eb4 (same PT+Study Level
+  # series, 2015-2026 vs this one's narrower 2015-2022)
+  "study_permit_holders/5d3a238a__canada_study_permit_holders_by_province_territory_of_intende",
+  # superseded by asylum_claimants/450f7e37 (identical PT+Claim Office
+  # Type coverage, more detail retained)
+  "asylum_claimants/13d02e73__canada_asylum_claimants_by_claim_office_type_province_territ",
+  # superseded by asylum_claimants/46bee0ae (same PT+Age series,
+  # 2015-2026 vs this one's narrower 2015-2025)
+  "asylum_claimants/bdac348b__canada_asylum_claimants_by_province_territory_of_claim_age_a",
+  # superseded by asylum_claimants/34c502f9 (identical PT+Gender
+  # coverage, more detail retained)
+  "asylum_claimants/ec417b64__canada_asylum_claimants_by_province_territory_of_claim_gende",
+  # superseded by permanent_residents/81021dfd (identical CMA+PT
+  # coverage, more detail retained)
+  "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma"
+)
+results <- purrr::keep(results, function(r) !(r$catalog_row$table_id %in% EXCLUDED_DUPLICATE_TABLE_IDS))
+
 facts <- purrr::map(results, "facts") |> bind_rows()
 catalog <- purrr::map(results, "catalog_row") |> bind_rows()
 

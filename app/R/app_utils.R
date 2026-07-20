@@ -521,70 +521,6 @@ category_colors <- function(levels_in_order) {
 #' null-coalesce is simpler than adding a dependency for one operator.
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-#' Genuinely-redundant tables to drop before building the per-theme
-#' dimension map (see build_theme_dimension_map()) - each is superseded by
-#' a sibling table with the identical geography+category signature, the
-#' same `is_stock`, and equal-or-wider year coverage (verified against the
-#' real catalog/facts data, not just title text - see the plan history for
-#' the research behind this list). Not a general dedup mechanism: most
-#' same-signature "duplicates" elsewhere in the catalog are genuinely
-#' different series (stock vs flow, population/program subset, or a
-#' distinct externally-normalized metric like "Percentage of French
-#' Speaking..." tables) and must stay independently selectable - see
-#' derive_series_label()/build_theme_dimension_map().
-EXCLUDED_DUPLICATE_TABLE_IDS <- c(
-  # superseded by study_permit_holders/d3702eb4 (same PT+Study Level
-  # series, 2015-2026 vs this one's narrower 2015-2022)
-  "study_permit_holders/5d3a238a__canada_study_permit_holders_by_province_territory_of_intende",
-  # superseded by asylum_claimants/450f7e37 (identical PT+Claim Office
-  # Type coverage, more detail retained)
-  "asylum_claimants/13d02e73__canada_asylum_claimants_by_claim_office_type_province_territ",
-  # superseded by asylum_claimants/46bee0ae (same PT+Age series,
-  # 2015-2026 vs this one's narrower 2015-2025)
-  "asylum_claimants/bdac348b__canada_asylum_claimants_by_province_territory_of_claim_age_a",
-  # superseded by asylum_claimants/34c502f9 (identical PT+Gender
-  # coverage, more detail retained)
-  "asylum_claimants/ec417b64__canada_asylum_claimants_by_province_territory_of_claim_gende",
-  # superseded by permanent_residents/81021dfd (identical CMA+PT
-  # coverage, more detail retained)
-  "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma"
-)
-
-#' A handful of catalog rows have level_N_label fields that don't match
-#' the real data in `facts` at all - a title-parsing bug upstream
-#' (guess_level_labels() in R/duckdb_utils.R), not something
-#' classify_level() can catch on its own (both labels below are
-#' individually plausible-looking; the bug is which column each one
-#' attached to). Confirmed by checking actual distinct values, not just
-#' title text - e.g. permanent_residents/840a3387's level_1_label says
-#' "Country of Birth" but level_1's real values are Male/Female;
-#' level_2_label says "Gender" but level_2's real values are country
-#' names. This is the table+label pair a user reported "Break down by =
-#' Country of Birth" plotting Male/Female against.
-#'
-#' Corrected here (applied to the collected `catalog` data.frame, see
-#' apply_label_corrections()) rather than in the source pipeline so it's
-#' easy to find/remove once the pipeline itself is fixed (see the spawned
-#' follow-up task investigating guess_level_labels() more broadly - this
-#' list is deliberately just the one confirmed case, not a general
-#' mechanism for the wider mislabeling pattern found during that
-#' investigation).
-LEVEL_LABEL_CORRECTIONS <- list(
-  "permanent_residents/840a3387__canada_adoptions_via_permanent_residence_fc6_fc9_by_country_" =
-    c(level_1_label = "Gender", level_2_label = "Country of Birth")
-)
-
-#' Apply LEVEL_LABEL_CORRECTIONS to a collected `catalog` data.frame.
-apply_label_corrections <- function(catalog) {
-  for (table_id in names(LEVEL_LABEL_CORRECTIONS)) {
-    fix <- LEVEL_LABEL_CORRECTIONS[[table_id]]
-    row <- which(catalog$table_id == table_id)
-    if (length(row) != 1) next
-    for (col in names(fix)) catalog[[col]][row] <- fix[[col]]
-  }
-  catalog
-}
-
 #' Decorator suffixes that dress up an otherwise-identical non-geographic
 #' category label across different tables of the same theme (found during
 #' the per-theme dimension map research - e.g. "Immigration Category — Pr
@@ -685,8 +621,10 @@ derive_series_label <- function(table_title, dataset, level_labels) {
 }
 
 #' Build the per-table dimension map every Geo/Category/Series selector in
-#' app.R is driven from - one row per surviving table_id (after dropping
-#' EXCLUDED_DUPLICATE_TABLE_IDS), with:
+#' app.R is driven from - one row per table_id in `catalog` (genuinely-
+#' redundant duplicate tables are dropped upstream, at database-creation
+#' time - see data-raw/05_build_duckdb.R's EXCLUDED_DUPLICATE_TABLE_IDS -
+#' so they're simply not present here), with:
 #'  - `geo_ranks`: list-column, the set of geographic ranks (CSD/CD/CMA/PT)
 #'    this table has (via classify_geo_rank())
 #'  - `categories`: list-column, the set of *normalized*
@@ -702,8 +640,6 @@ derive_series_label <- function(table_title, dataset, level_labels) {
 #'    present and non-empty, else derive_series_label()
 #' Computed once at app startup (like `catalog` itself), not per-session.
 build_theme_dimension_map <- function(catalog, series_label_lookup = character()) {
-  catalog <- catalog[!catalog$table_id %in% EXCLUDED_DUPLICATE_TABLE_IDS, , drop = FALSE]
-
   level_label_cols <- c("level_1_label", "level_2_label", "level_3_label", "level_4_label", "level_5_label")
 
   rows <- lapply(seq_len(nrow(catalog)), function(i) {

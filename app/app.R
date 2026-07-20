@@ -60,15 +60,17 @@ THEME_CHOICES <- setNames(names(DATASET_LABELS), DATASET_LABELS)
 con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 onStop(function() dbDisconnect(con, shutdown = TRUE))
 
-catalog <- tbl(con, "catalog") |> collect() |> apply_label_corrections() |> split_temporary_workers()
+catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 
 # ---- theme dimension map --------------------------------------------------
-# One row per surviving table_id (drops EXCLUDED_DUPLICATE_TABLE_IDS),
-# classifying every level's geographic rank/category up front - what
-# Geographic Aggregation, Geographic unit, Break down by, and the (usually
-# hidden) Series selector are all driven from, instead of the old
-# per-session "Select Data table" pick. Built once at startup like
+# One row per table_id, classifying every level's geographic rank/category
+# up front - what Geographic Aggregation, Geographic unit, Break down by,
+# and the (usually hidden) Series selector are all driven from, instead of
+# the old per-session "Select Data table" pick. Built once at startup like
 # `catalog` itself - see build_theme_dimension_map() in R/app_utils.R.
+# Known data-quality corrections (mislabeled levels, superseded duplicate
+# tables) are applied upstream at database-creation time, not here - see
+# data-raw/05_build_duckdb.R.
 theme_dim_map <- build_theme_dimension_map(catalog)
 
 # ---- source citation ------------------------------------------------------
