@@ -80,32 +80,6 @@ results <- lapply(results, function(r) {
   r
 })
 
-# A handful of catalog rows have level_N_label fields that don't match the
-# real data in `facts` at all - a title-parsing bug in guess_level_labels()
-# (see R/duckdb_utils.R) that misattributes which label belongs to which
-# column. Confirmed by checking actual distinct values in the affected
-# columns, not just title text - e.g. permanent_residents/840a3387's
-# level_1_label said "Country of Birth" but level_1's real values were
-# Male/Female; level_2_label said "Gender" but level_2's real values were
-# country names (a user noticed this live: picking "Break down by = Country
-# of Birth" plotted Gender). Corrected here as a targeted, documented
-# override rather than fixing guess_level_labels() itself, which would need
-# to correctly parse this table's specific source title structure - same
-# spirit as the dataset relabel just above.
-LEVEL_LABEL_CORRECTIONS <- list(
-  "permanent_residents/840a3387__canada_adoptions_via_permanent_residence_fc6_fc9_by_country_" =
-    c(level_1_label = "Gender", level_2_label = "Country of Birth")
-)
-
-results <- lapply(results, function(r) {
-  if (is.null(r)) return(r)
-  fix <- LEVEL_LABEL_CORRECTIONS[[r$catalog_row$table_id]]
-  if (!is.null(fix)) {
-    for (col in names(fix)) r$catalog_row[[col]] <- fix[[col]]
-  }
-  r
-})
-
 if (all(c("rpd_decisions", "rpd_1997_2021") %in% names(refugee_source_slugs))) {
   refugees_result <- tryCatch(
     build_refugees_table(refugee_source_slugs[["rpd_decisions"]], refugee_source_slugs[["rpd_1997_2021"]]),

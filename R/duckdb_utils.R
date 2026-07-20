@@ -29,6 +29,14 @@ value_cols <- c("value", "suppressed", "is_percent")
 #' for any level beyond what the title spells out (deep sub-categories, e.g.
 #' Immigration Category > Group > Component, are rarely fully named in the
 #' title).
+#'
+#' Purely textual, and purely positional - it has no way to notice when the
+#' title's own word order doesn't match the table's real column order (the
+#' CKAN catalog title for permanent_residents/840a3387 reads "by Country of
+#' Birth and Gender", but the source file's actual columns are ordered
+#' Gender-then-Country - the title-writer and the spreadsheet just don't
+#' agree). classify_level_content()/resolve_level_labels() below correct
+#' for that by checking the real data instead of trusting title order.
 guess_level_labels <- function(title, n_levels) {
   by_part <- sub("^.*?\\bby\\b\\s*", "", title, ignore.case = TRUE)
   by_part <- sub(",?\\s*\\(.*?ranking\\).*$", "", by_part)
@@ -47,6 +55,184 @@ guess_level_labels <- function(title, n_levels) {
   labels
 }
 
+#' Canada's 13 provinces/territories - a small, closed, universal
+#' vocabulary, so a level column whose real values are mostly drawn from
+#' this list can be identified as "Province/Territory" directly from its
+#' content, independent of anything the title says.
+PROVINCE_TERRITORY_NAMES <- c(
+  "Alberta", "British Columbia", "Manitoba", "New Brunswick",
+  "Newfoundland and Labrador", "Northwest Territories", "Nova Scotia",
+  "Nunavut", "Ontario", "Prince Edward Island", "Quebec", "Saskatchewan",
+  "Yukon"
+)
+
+#' Generic catch-all values ("Not stated", "Unknown", ...) show up across
+#' many different dimensions (Gender, Age, Citizenship, ...), so on their
+#' own they don't distinguish one dimension from another - excluded
+#' entirely from CONTENT_LABEL_MATCHERS' match fraction (neither counted
+#' as a match nor a mismatch) rather than either penalizing or crediting
+#' whichever vocabulary happens to be tested first.
+GENERIC_CATCHALL_VALUES <- c("not stated", "unknown", "n/a", "na")
+
+#' Content-based classifiers for the handful of dimension types that are
+#' both (a) small/closed/universal vocabularies, so real column values can
+#' be checked against a known list or shape, and (b) common enough sources
+#' of the title/column-order mismatch bug (see guess_level_labels()) to be
+#' worth the trouble. Each function takes one level_N column's raw values
+#' and returns the fraction (0-1) that plausibly belong to that dimension,
+#' after stripping GENERIC_CATCHALL_VALUES and requiring at least 2
+#' distinct remaining values (so a single-value column, most often already
+#' filtered down to one entity, can't false-positive at 100%).
+CONTENT_LABEL_MATCHERS <- list(
+  "Province/Territory" = function(vals) {
+    vals <- unique(trimws(vals[!is.na(vals)]))
+    vals <- vals[!tolower(vals) %in% GENERIC_CATCHALL_VALUES]
+    if (length(vals) < 2) return(0)
+    mean(vals %in% PROVINCE_TERRITORY_NAMES)
+  },
+  "Gender" = function(vals) {
+    vals <- unique(tolower(trimws(vals[!is.na(vals)])))
+    vals <- vals[!vals %in% GENERIC_CATCHALL_VALUES]
+    if (length(vals) < 2) return(0)
+    mean(vals %in% c("male", "female", "another gender", "gender not stated", "gender x"))
+  },
+  "Age Group" = function(vals) {
+    vals <- unique(trimws(vals[!is.na(vals)]))
+    vals <- vals[!tolower(vals) %in% GENERIC_CATCHALL_VALUES]
+    if (length(vals) < 2) return(0)
+    mean(grepl("years?\\s*old|^\\d+\\s*(to|-)\\s*\\d+$", vals, ignore.case = TRUE))
+  }
+)
+
+#' A content match has to be this confident (fraction of distinct values
+#' recognized) before it's trusted to override/supply a label - loose
+#' enough to tolerate an odd extra catch-all category slipping through the
+#' GENERIC_CATCHALL_VALUES filter, strict enough that an unrelated
+#' dimension with a couple of coincidentally-matching values won't
+#' misfire.
+CONTENT_MATCH_THRESHOLD <- 0.8
+
+#' Classify one level_N column's actual values against
+#' CONTENT_LABEL_MATCHERS, returning the best-matching label name if it
+#' clears CONTENT_MATCH_THRESHOLD, else NA (most dimensions - Immigration
+#' Category, Program, Occupation, Country, ... - have no small universal
+#' vocabulary to check against and always return NA here, falling back to
+#' guess_level_labels()'s title-based guess via resolve_level_labels()).
+classify_level_content <- function(values) {
+  scores <- vapply(CONTENT_LABEL_MATCHERS, function(f) f(values), numeric(1))
+  best <- which.max(scores)
+  if (scores[best] >= CONTENT_MATCH_THRESHOLD) names(CONTENT_LABEL_MATCHERS)[best] else NA_character_
+}
+
+#' Cheap keyword check for whether a title-derived label already
+#' plausibly refers to the same dimension a content match found - e.g.
+#' "Province/Territory of Intended Destination" and "P/T of Designated
+#' Learning Institution Type" both contain a province/territory keyword,
+#' so a content match of "Province/Territory" doesn't necessarily mean
+#' the title got the *position* wrong, just that it's more (or less)
+#' descriptive than the generic content label. Only titles that don't
+#' even mention the right keyword at all are genuinely inconsistent -
+#' i.e., actually pointing at the wrong dimension.
+CONTENT_LABEL_KEYWORDS <- list(
+  "Province/Territory" = "province|territory",
+  "Gender" = "gender|\\bsex\\b",
+  "Age Group" = "\\bage\\b"
+)
+
+label_matches_keyword <- function(text, content_label) {
+  kw <- CONTENT_LABEL_KEYWORDS[[content_label]]
+  !is.null(kw) && grepl(kw, text, ignore.case = TRUE)
+}
+
+#' Reconcile guess_level_labels()'s title-derived labels (positional, but
+#' can be wrong when the source title's word order doesn't match the
+#' table's real column order) against classify_level_content()'s
+#' content-derived labels (reads the real level_N values, always right
+#' when confident, but only recognizes a few closed vocabularies so most
+#' positions come back NA and still need the title guess).
+#'
+#' Deliberately conservative: a position's title label is only touched at
+#' all when there's a genuine, detected conflict - never just because
+#' content has *an* opinion. Concretely:
+#'  1. A position is "self-consistent" (left completely alone) when
+#'     content has no opinion (NA) or content's opinion agrees with what
+#'     the title already implies there via CONTENT_LABEL_KEYWORDS - this
+#'     is what keeps a more descriptive title phrase ("Province/Territory
+#'     of Intended Destination") from being needlessly flattened to the
+#'     generic content label it's consistent with, and what stops an
+#'     otherwise-correct table from having an unrelated position's label
+#'     silently reassigned or dropped (an earlier version of this
+#'     function had exactly that bug: it unconditionally removed any
+#'     title phrase matching a content label from a shared pool, which
+#'     both flattened descriptive-but-consistent titles AND, worse, could
+#'     silently drop or shift a *different*, perfectly correct label at
+#'     another position once the pool ran out).
+#'  2. A position is genuinely conflicted when content disagrees outright
+#'     (case: guess_level_labels() attached the wrong phrase to it), or -
+#'     the knock-on case - when some *other* conflicted position's
+#'     content match is what this position's own title phrase actually
+#'     describes (case: this position's rightful phrase got attached to
+#'     the wrong position instead, e.g. the classic swap in
+#'     permanent_residents/840a3387, "by Country of Birth and Gender"
+#'     describing data that's really Gender-then-Country - position 1's
+#'     content conflicts with "Country of Birth", *and* position 2's own
+#'     phrase, "Gender", is exactly what position 1's content says is
+#'     there, so position 2 is conflicted too even though its own content
+#'     signal alone was NA).
+#'  3. Only conflicted positions get replaced: a confident content match
+#'     wins outright at its own position; any other conflicted position
+#'     is filled from whatever's left in the *conflicted set's own* pool
+#'     of original title phrases (excluding whichever ones content already
+#'     claimed elsewhere), in their original relative order. Untouched,
+#'     self-consistent positions are never pulled into this pool at all,
+#'     so they can never be emptied out from under an unrelated position.
+resolve_level_labels <- function(title_labels, content_labels) {
+  n <- length(title_labels)
+
+  self_consistent <- vapply(seq_len(n), function(i) {
+    is.na(content_labels[i]) || label_matches_keyword(title_labels[i], content_labels[i])
+  }, logical(1))
+
+  conflicted <- !self_consistent
+  for (i in which(!self_consistent)) {
+    for (j in seq_len(n)) {
+      # only pull in a position with no content opinion of its own
+      # (is.na(content_labels[j])) - one that already has its own
+      # independent, consistent content match doesn't need "donating"
+      # just because its title phrase also happens to mention the same
+      # keyword as a different position's conflict.
+      if (j != i && !conflicted[j] && is.na(content_labels[j]) &&
+          label_matches_keyword(title_labels[j], content_labels[i])) {
+        conflicted[j] <- TRUE
+      }
+    }
+  }
+
+  if (!any(conflicted)) return(title_labels)
+
+  final <- title_labels
+  final[conflicted] <- NA_character_
+  for (i in which(conflicted)) {
+    if (!is.na(content_labels[i])) final[i] <- content_labels[i]
+  }
+
+  pool <- title_labels[conflicted]
+  claimed <- tolower(content_labels[conflicted][!is.na(content_labels[conflicted])])
+  for (txt in claimed) {
+    hit <- which(tolower(pool) == txt)[1]
+    if (!is.na(hit)) pool <- pool[-hit]
+  }
+
+  li <- 1
+  for (i in which(conflicted)) {
+    if (is.na(final[i])) {
+      final[i] <- if (li <= length(pool)) pool[li] else paste("Category Level", i)
+      li <- li + 1
+    }
+  }
+  final
+}
+
 #' Normalize one processed long table into the unified schema, returning
 #' the reshaped facts and a one-row catalog entry.
 normalize_table <- function(long, table_id, dataset, table_title) {
@@ -55,7 +241,11 @@ normalize_table <- function(long, table_id, dataset, table_title) {
   if (is_pivot) {
     level_cols <- grep("^level_[0-9]+$", names(long), value = TRUE)
     n_levels <- length(level_cols)
-    labels <- guess_level_labels(table_title, n_levels)
+    title_labels <- guess_level_labels(table_title, n_levels)
+    # Check the real data before trusting the title's word order - see
+    # resolve_level_labels()/classify_level_content() above.
+    content_labels <- vapply(level_cols, function(col) classify_level_content(long[[col]]), character(1))
+    labels <- resolve_level_labels(title_labels, content_labels)
 
     facts <- long |>
       dplyr::select(dplyr::all_of(level_cols), "row_level", "is_row_subtotal",
