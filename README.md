@@ -57,7 +57,7 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
     - Also copies `data-raw/manifest.csv` to `app/data/source_manifest.csv`
       - the app's source-citation feature (below) reads that copy rather than reaching into `data-raw/` at runtime, keeping `app/` self-contained.
 
-7.  **`data-raw/06_build_short_labels.R`** — (re)generates `app/data/table_short_labels.xlsx`, an editable Excel Table of "Data table" dropdown labels (`table_id` → `short_label`). Defaults come from `app/R/app_utils.R::simplify_table_label()`; hand edits to `short_label` survive a re-run (matched by `table_id`) so a one-off tweak doesn't need to be re-applied after every refresh. The app reads this file at startup and falls back to `simplify_table_label()` for any `table_id` missing from it.
+7.  **`data-raw/06_build_label_lookups.R`** — (re)generates two editable Excel Tables app.R reads at startup: `app/data/series_names.xlsx` (`table_id` → `Series (custom)`, overriding `derive_series_label()`'s guess for one specific table) and `app/data/breakdown_names.xlsx` (`Breakdown item (auto)` → `(custom)`, renaming a normalized category everywhere at once - the Break down by list, Series matching, and the chart's category axis). Hand edits to either "(custom)" column survive a re-run (matched by `table_id` / `Breakdown item (auto)` respectively) so a one-off tweak doesn't need to be re-applied after every refresh.
 
 Run from the project root:
 
@@ -68,7 +68,7 @@ source("data-raw/02_download_data.R")
 source("data-raw/03_process_tables.R")
 source("data-raw/04_validate_tables.R")
 source("data-raw/05_build_duckdb.R")
-source("data-raw/06_build_short_labels.R")
+source("data-raw/06_build_label_lookups.R")
 ```
 
 ``` sh
@@ -77,7 +77,7 @@ quarto render reports/data_quality_report.qmd --to pdf
 
 ## Running the app
 
-The app lives entirely under `app/` - a self-contained bundle with its own `app.R`, `R/`, `www/`, `ABOUT.md`, and `data/` (a copy of the data-prep pipeline's output: `immigration.duckdb`, `table_short_labels.xlsx`, and `source_manifest.csv`). It doesn't read anything from outside `app/` at runtime, on purpose - see "Layout" and "Deploying to shinyapps.io" below.
+The app lives entirely under `app/` - a self-contained bundle with its own `app.R`, `R/`, `www/`, `ABOUT.md`, and `data/` (a copy of the data-prep pipeline's output: `immigration.duckdb`, `series_names.xlsx`, `breakdown_names.xlsx`, and `source_manifest.csv`). It doesn't read anything from outside `app/` at runtime, on purpose - see "Layout" and "Deploying to shinyapps.io" below.
 
 ``` r
 shiny::runApp("app")
@@ -100,7 +100,7 @@ The bottom of the plot card cites the displayed table's original CKAN resource(s
 
 ## Refreshing
 
-IRCC republishes its files roughly monthly; IRB republishes `rpd_decisions` roughly quarterly (`rpd_1997_2021` is a static one-off, it won't change). To pick up the latest data (and any newly-added tables), just re-run the scripts above in order — `01_build_manifest.R` re-derives the table list from the live CKAN API in case a new breakdown was added, `02_download_data.R` skips resources whose CKAN timestamp hasn't changed (and hash-compares anything it does fetch), `03_process_tables.R` reprocesses everything (cheap - a few minutes for all tables), `04_validate_tables.R` re-runs the consistency checks (the slowest step - several minutes, dominated by a handful of tables with 500k+ rows), `05_build_duckdb.R` rebuilds the app's database (a couple of minutes), and `06_build_short_labels.R` refreshes the dropdown-label lookup - adding rows for any newly-added table without touching hand-edited labels for existing ones. Both write straight into `app/data/`. The running Shiny app picks up a rebuilt `app/data/immigration.duckdb` and `app/data/table_short_labels.xlsx` on its next restart (it opens one read-only connection at startup).
+IRCC republishes its files roughly monthly; IRB republishes `rpd_decisions` roughly quarterly (`rpd_1997_2021` is a static one-off, it won't change). To pick up the latest data (and any newly-added tables), just re-run the scripts above in order — `01_build_manifest.R` re-derives the table list from the live CKAN API in case a new breakdown was added, `02_download_data.R` skips resources whose CKAN timestamp hasn't changed (and hash-compares anything it does fetch), `03_process_tables.R` reprocesses everything (cheap - a few minutes for all tables), `04_validate_tables.R` re-runs the consistency checks (the slowest step - several minutes, dominated by a handful of tables with 500k+ rows), `05_build_duckdb.R` rebuilds the app's database (a couple of minutes), and `06_build_label_lookups.R` refreshes the `series_names.xlsx`/`breakdown_names.xlsx` lookups - adding rows for any newly-added table/category without touching hand-edited "(custom)" values for existing ones. All three write straight into `app/data/`. The running Shiny app picks up a rebuilt `app/data/immigration.duckdb`, `series_names.xlsx`, and `breakdown_names.xlsx` on its next restart (it opens one read-only connection at startup).
 
 ## Layout
 
@@ -111,9 +111,10 @@ app/                                    # self-contained Shiny app bundle - depl
 app/app.R                               # Shiny app
 app/ABOUT.md                            # user-facing "About" content, rendered in-app via the About button
 app/www/custom.css                      # text styling for every labelled element in the app (linked from app.R's <head>)
-app/R/app_utils.R                       # app query/aggregation helpers (DuckDB -> plot data); also sourced by data-raw/06 for its label-simplifying helpers
+app/R/app_utils.R                       # app query/aggregation helpers (DuckDB -> plot data); also sourced by data-raw/06 for build_theme_dimension_map()
 app/data/immigration.duckdb             # app database, gitignored (regenerate via data-raw/05_build_duckdb.R)
-app/data/table_short_labels.xlsx        # editable "Data table" dropdown labels (see data-raw/06_build_short_labels.R) - tracked in git, hand edits preserved on regen
+app/data/series_names.xlsx              # editable table_id -> Series name overrides (see data-raw/06_build_label_lookups.R) - tracked in git, hand edits preserved on regen
+app/data/breakdown_names.xlsx           # editable Breakdown item name overrides (see data-raw/06_build_label_lookups.R) - tracked in git, hand edits preserved on regen
 app/data/source_manifest.csv            # copy of data-raw/manifest.csv, for the in-app source citation - tracked in git, regenerated by data-raw/05
 .claude/launch.json                     # preview/dev-server config for app/app.R
 R/ingest_utils.R                        # manifest-building + dataset-discovery helpers

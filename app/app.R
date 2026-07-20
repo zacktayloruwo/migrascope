@@ -13,11 +13,11 @@
 # Data comes from data/immigration.duckdb - built by the data-prep pipeline
 # at the repo root (../data-raw/05_build_duckdb.R from ../data/processed/)
 # and copied here, not generated in place. See ../README.md for the full
-# pipeline; that file also (re)writes data/table_short_labels.xlsx and
-# data/source_manifest.csv, this app's other two data inputs besides the
-# duckdb itself. The duckdb has a `facts` table (unified schema across all
-# source tables - see ../R/duckdb_utils.R) and a `catalog` table describing
-# each table's dimensions.
+# pipeline; that file also (re)writes data/series_names.xlsx,
+# data/breakdown_names.xlsx, and data/source_manifest.csv, this app's other
+# data inputs besides the duckdb itself. The duckdb has a `facts` table
+# (unified schema across all source tables - see ../R/duckdb_utils.R) and a
+# `catalog` table describing each table's dimensions.
 
 library(shiny)
 library(bslib)
@@ -34,6 +34,7 @@ library(dbplyr)
 library(plotly)
 library(ggplot2)
 library(scales)
+library(readxl)
 
 source("R/app_utils.R")
 
@@ -62,6 +63,24 @@ onStop(function() dbDisconnect(con, shutdown = TRUE))
 
 catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 
+# ---- editable name overrides ----------------------------------------------
+# Two hand-editable Excel Tables (see data-raw/06_build_label_lookups.R,
+# which regenerates the "(auto)" columns on every pipeline refresh while
+# preserving whatever's already typed into "(custom)" - same
+# survives-a-refresh spirit the old table_short_labels.xlsx short_label
+# column used). Only non-blank "(custom)" values become overrides; a
+# missing file (e.g. a fresh checkout before the pipeline's been run once)
+# just means no overrides are active, not an error.
+read_custom_name_lookup <- function(path, key_col, custom_col) {
+  if (!file.exists(path)) return(character())
+  d <- read_excel(path, sheet = 1)
+  custom <- trimws(as.character(d[[custom_col]]))
+  keep <- !is.na(custom) & nzchar(custom)
+  stats::setNames(custom[keep], d[[key_col]][keep])
+}
+series_label_lookup <- read_custom_name_lookup("data/series_names.xlsx", "table_id", "Series (custom)")
+breakdown_label_lookup <- read_custom_name_lookup("data/breakdown_names.xlsx", "Breakdown item (auto)", "Breakdown item (custom)")
+
 # ---- theme dimension map --------------------------------------------------
 # One row per table_id, classifying every level's geographic rank/category
 # up front - what Geographic Aggregation, Geographic unit, Break down by,
@@ -71,7 +90,8 @@ catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 # Known data-quality corrections (mislabeled levels, superseded duplicate
 # tables) are applied upstream at database-creation time, not here - see
 # data-raw/05_build_duckdb.R.
-theme_dim_map <- build_theme_dimension_map(catalog)
+theme_dim_map <- build_theme_dimension_map(catalog, series_label_lookup = series_label_lookup,
+                                            breakdown_label_lookup = breakdown_label_lookup)
 
 # ---- source citation ------------------------------------------------------
 # data/source_manifest.csv is a copy of the data-prep pipeline's

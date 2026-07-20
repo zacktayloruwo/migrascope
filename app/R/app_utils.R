@@ -552,33 +552,28 @@ normalize_category_label <- function(label) {
 
 #' Derive a short "Series" label distinguishing tables that otherwise share
 #' the same theme/geography/category signature (see
-#' build_theme_dimension_map()) - the opposite operation from
-#' simplify_table_label(): that function keeps the breakdown text and
-#' drops boilerplate; this one drops the breakdown text (now surfaced via
-#' separate selectors) and keeps whatever's left - population/program
+#' build_theme_dimension_map()) - drops the breakdown text (now surfaced
+#' via separate selectors) and keeps whatever's left - population/program
 #' qualifiers ("French-Speaking", "Humanitarian & Compassionate"),
 #' precomputed-metric qualifiers ("Percentage of..."), or snapshot
 #' qualifiers ("on December 31st") that make it a genuinely different
 #' series. Returns "" when nothing distinguishing survives (the common
 #' case - most tables need no Series label at all, see `series_needed` in
-#' app.R). A human-curated `series_label` column in
-#' data/table_short_labels.xlsx overrides this per-table when the
-#' automatic result reads awkwardly (mirrors how `short_label` already
-#' works - see table_short_labels() in app.R).
+#' app.R). A human-curated "Series (custom)" column in
+#' data/series_names.xlsx (keyed by table_id) overrides this per-table
+#' when the automatic result reads awkwardly - see the
+#' `series_label_lookup` param of build_theme_dimension_map() below.
 derive_series_label <- function(table_title, dataset, level_labels) {
   x <- table_title
 
-  # same leading-subject stripping simplify_table_label() does - but
-  # deliberately NOT THEME_BOILERPLATE, which exists specifically to strip
-  # population/program qualifiers ("French-Speaking Permanent Residents",
-  # "Percentage of...") from the old "Select Data table" short label. This
-  # function wants exactly the opposite: keep those (they're what makes a
-  # Series option distinguishable), only strip the dimension text that's
-  # now surfaced via Geographic Aggregation/Break down by instead.
+  # Strips the leading subject boilerplate ("Canada -"/"Quebec -"/etc) but
+  # deliberately keeps population/program qualifiers ("French-Speaking
+  # Permanent Residents", "Percentage of...") - they're what makes a
+  # Series option distinguishable; only the dimension text now surfaced
+  # via Geographic Aggregation/Break down by gets stripped below.
   #
   # Also deliberately does NOT strip a trailing "— Pr Pt X"-style
-  # multi-sheet disambiguator the way simplify_table_label() does - for
-  # THAT function it's noise, but here it's frequently the *only* thing
+  # multi-sheet disambiguator - it's frequently the *only* thing
   # distinguishing several same-hash sheets of one source workbook at
   # different drill-down depths (e.g. permanent_residents/d839c522's four
   # sheets - "— Pr Pt Immcat", "— Pr Immcat", "— Pr Immcat g", "— Pr
@@ -646,17 +641,30 @@ derive_series_label <- function(table_title, dataset, level_labels) {
 #'    this table has (via classify_geo_rank())
 #'  - `categories`: list-column, the set of *normalized*
 #'    (normalize_category_label()) non-geographic, non-filler category
-#'    labels this table has
+#'    labels this table has, with `breakdown_label_lookup` overrides
+#'    applied (see below)
 #'  - `classification`: list-column, this table's full classify_level()
-#'    output (label/geo_rank/is_filler) with `level_index` attached - the
-#'    same shape app.R's old level_classification() reactive used to
-#'    compute per-table on every reactive tick; precomputed once here
-#'    instead
-#'  - `series_label`: from `series_label_lookup` (keyed by table_id - see
-#'    table_short_labels()'s identical pattern for `short_label`) if
+#'    output (label/geo_rank/is_filler) with `level_index` attached and
+#'    `label_normalized` already overridden - the same shape app.R's old
+#'    level_classification() reactive used to compute per-table on every
+#'    reactive tick; precomputed once here instead
+#'  - `series_label`: from `series_label_lookup` (keyed by table_id) if
 #'    present and non-empty, else derive_series_label()
+#'
+#' `series_label_lookup` (keyed by table_id) and `breakdown_label_lookup`
+#' (keyed by the *auto* normalized category name) are the "(custom)"
+#' columns of data/series_names.xlsx and data/breakdown_names.xlsx -
+#' editable Excel Tables app.R loads at startup, in the same
+#' hand-edits-survive-a-refresh spirit the old table_short_labels.xlsx
+#' short_label column used (see data-raw/06_build_label_lookups.R, which
+#' regenerates both files' "auto" columns while preserving any "(custom)"
+#' values already typed in). A `breakdown_label_lookup` override renames a
+#' category everywhere at once - the Break down by choice list, the
+#' Series/candidate-matching signature, and the resolved chart's category
+#' axis all key off the same overridden `label_normalized` value.
 #' Computed once at app startup (like `catalog` itself), not per-session.
-build_theme_dimension_map <- function(catalog, series_label_lookup = character()) {
+build_theme_dimension_map <- function(catalog, series_label_lookup = character(),
+                                       breakdown_label_lookup = character()) {
   level_label_cols <- c("level_1_label", "level_2_label", "level_3_label", "level_4_label", "level_5_label")
 
   rows <- lapply(seq_len(nrow(catalog)), function(i) {
@@ -666,6 +674,10 @@ build_theme_dimension_map <- function(catalog, series_label_lookup = character()
     cl <- classify_level(unname(labels[idx]))
     cl$level_index <- idx
     cl$label_normalized <- normalize_category_label(cl$label)
+    if (length(breakdown_label_lookup) > 0) {
+      overridden <- unname(breakdown_label_lookup[cl$label_normalized])
+      cl$label_normalized <- ifelse(!is.na(overridden) & nzchar(overridden), overridden, cl$label_normalized)
+    }
 
     cat_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
 
@@ -811,57 +823,9 @@ split_temporary_workers <- function(catalog) {
   catalog
 }
 
-#' Per-dataset boilerplate stripped from `table_title` when building the
-#' short "Data table" dropdown label (see simplify_table_label()). Every
-#' table within a dataset tab repeats the theme name (e.g. "Permanent
-#' Residents") and often a subject clause, which is redundant with the tab
-#' title and the (unchanged) plot title - only the part of the title that
-#' actually varies between a dataset's tables is useful in the dropdown.
-#'
-#' Each entry is either a bare regex (stripped to "") or a
-#' `pattern = "replacement"` pair, e.g. the Humanitarian & Compassionate
-#' phrase under temporary_workers_imp - that program name is kept (not
-#' stripped) because, unlike the IMP/TFWP program names themselves, it's
-#' not implied by the tab title and is the one thing distinguishing those
-#' tables from the rest of the IMP tab.
-THEME_BOILERPLATE <- list(
-  permanent_residents = c(
-    "Admissions of French-Speaking Permanent Residents",
-    "Admissions of English-Speaking Permanent Residents",
-    "Admissions of Permanent Residents",
-    "Percentage of French Speaking Permanent Residents",
-    "Percentage of English-Speaking Permanent Residents",
-    "French-Speaking Permanent Residents",
-    "English-Speaking Permanent Residents",
-    "Permanent [Rr]esidents?"
-  ),
-  temporary_workers_imp = c(
-    "All International Mobility Program \\(IMP\\) work permit holders" = "",
-    "International Mobility Program \\(IMP\\) [Ww]ork [Pp]ermit [Hh]olders" = "",
-    "International Mobility Program [Ww]ork [Pp]ermit [Hh]olders" = "",
-    "Work permit holders for Humanitarian (&|and) Compassionate purposes" = "Humanitarian & Compassionate"
-  ),
-  temporary_workers_tfwp = c(
-    "Temporary Foreign Worker Program \\(TFWP\\) [Ww]ork [Pp]ermit [Hh]olders" = "",
-    "Temporary Foreign Worker Program [Ww]ork [Pp]ermit [Hh]olders" = ""
-  ),
-  study_permit_holders = c(
-    "Study permit holders"
-  ),
-  asylum_claimants = c(
-    "Asylum Claimants"
-  ),
-  tr_to_pr_transition = c(
-    "Permanent Residents with [Pp]rior "
-  ),
-  refugees = c(
-    "Refugee Protection Division \\(RPD\\) Decisions",
-    "RPD decisions"
-  )
-)
-
-#' General phrase -> abbreviation map applied after THEME_BOILERPLATE,
-#' regardless of dataset. Matched case-insensitively (source titles mix
+#' General phrase -> abbreviation map, used by derive_series_label() to
+#' compact whatever population/program qualifier text survives its
+#' boilerplate-stripping. Matched case-insensitively (source titles mix
 #' "Province/Territory" and "province/territory" for the same concept) but
 #' the replacement text is always used verbatim, so output stays consistent
 #' (always "P/T", never a mix of "P/T" and "p/t").
@@ -887,60 +851,6 @@ GENERAL_ABBREV <- c(
   "work permit holders" = "permits",
   "Work Permit Holders" = "Permits"
 )
-
-#' Shorten a catalog `table_title` into a compact "Data table" dropdown
-#' label: strips the leading "Canada -"/"Quebec -" subject and the
-#' dataset's theme name (already shown as the tab title and, unabridged, as
-#' the plot title - see app.R's output$plot_title), then abbreviates common
-#' long phrases via GENERAL_ABBREV. Falls back to the original title if
-#' stripping leaves nothing usefully short (e.g. rpd_decisions' single
-#' table, whose title *is* the theme name).
-simplify_table_label <- function(table_title, dataset) {
-  x <- table_title
-
-  # drop a trailing multi-sheet disambiguator artifact, e.g. "— Pr Age"
-  x <- sub("\\s*[—-]\\s*[A-Z][a-z]+(\\s[A-Za-z]+){0,3}\\s*$", "", x)
-
-  # strip leading subject boilerplate
-  x <- sub("^Open Dataset Request \\d+ (ENG|FRA)\\s*-?\\s*", "", x)
-  x <- sub("^Canada\\s*\\(excluding Quebec\\)\\s*[-–]\\s*", "", x)
-  x <- sub("^Canada\\s+ex-QC\\s*[-–]\\s*", "", x)
-  x <- sub("^Canada\\s*[-–]\\s*", "", x)
-  x <- sub("^Quebec\\s*[-–]\\s*", "", x)
-
-  boilerplate <- THEME_BOILERPLATE[[dataset]] %||% character()
-  boilerplate_pat <- names(boilerplate)
-  if (is.null(boilerplate_pat)) boilerplate_pat <- rep("", length(boilerplate))
-  for (i in seq_along(boilerplate)) {
-    pat <- if (nzchar(boilerplate_pat[i])) boilerplate_pat[i] else unname(boilerplate[i])
-    repl <- if (nzchar(boilerplate_pat[i])) unname(boilerplate[i]) else ""
-    x <- sub(pat, repl, x, perl = TRUE)
-  }
-
-  # rpd_1997_2021's title: "from 1997-2021 by outcome and province of
-  # claimant" reads better with the date range moved to a trailing suffix
-  x <- sub("^\\s*from (\\d{4}-\\d{4}) by (.*)$", "By \\2 (\\1)", x, ignore.case = TRUE, perl = TRUE)
-
-  for (i in seq_along(GENERAL_ABBREV)) {
-    x <- gsub(names(GENERAL_ABBREV)[i], GENERAL_ABBREV[i], x, ignore.case = TRUE, perl = TRUE)
-  }
-
-  x <- gsub("\\s+", " ", x)
-  x <- gsub("\\s+,", ",", x)          # drop a space left dangling before a comma
-  x <- gsub(",\\s*,", ",", x)
-  x <- gsub(",\\s*(\\(|$)", "\\1", x) # drop a comma left dangling before "(" or end of string
-  x <- sub("^\\s*,\\s*", "", x)
-  x <- sub("^\\s*by\\s+", "By ", x, ignore.case = TRUE)
-  x <- trimws(x)
-  x <- sub("\\.$", "", x)
-
-  # capitalize whatever word now leads the label (boilerplate stripping can
-  # leave a lowercase word, e.g. a source "...program..." fragment, at the front)
-  if (nchar(x) > 0) substr(x, 1, 1) <- toupper(substr(x, 1, 1))
-
-  if (nchar(x) < 4) x <- trimws(table_title)
-  x
-}
 
 #' Convert absolute values to % of total per period, for Display as =
 #' "Percentage of Total". No special-casing needed for whether a
