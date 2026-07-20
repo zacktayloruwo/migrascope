@@ -60,7 +60,7 @@ THEME_CHOICES <- setNames(names(DATASET_LABELS), DATASET_LABELS)
 con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 onStop(function() dbDisconnect(con, shutdown = TRUE))
 
-catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
+catalog <- tbl(con, "catalog") |> collect() |> apply_label_corrections() |> split_temporary_workers()
 
 # ---- theme dimension map --------------------------------------------------
 # One row per surviving table_id (drops EXCLUDED_DUPLICATE_TABLE_IDS),

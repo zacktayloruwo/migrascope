@@ -550,6 +550,41 @@ EXCLUDED_DUPLICATE_TABLE_IDS <- c(
   "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma"
 )
 
+#' A handful of catalog rows have level_N_label fields that don't match
+#' the real data in `facts` at all - a title-parsing bug upstream
+#' (guess_level_labels() in R/duckdb_utils.R), not something
+#' classify_level() can catch on its own (both labels below are
+#' individually plausible-looking; the bug is which column each one
+#' attached to). Confirmed by checking actual distinct values, not just
+#' title text - e.g. permanent_residents/840a3387's level_1_label says
+#' "Country of Birth" but level_1's real values are Male/Female;
+#' level_2_label says "Gender" but level_2's real values are country
+#' names. This is the table+label pair a user reported "Break down by =
+#' Country of Birth" plotting Male/Female against.
+#'
+#' Corrected here (applied to the collected `catalog` data.frame, see
+#' apply_label_corrections()) rather than in the source pipeline so it's
+#' easy to find/remove once the pipeline itself is fixed (see the spawned
+#' follow-up task investigating guess_level_labels() more broadly - this
+#' list is deliberately just the one confirmed case, not a general
+#' mechanism for the wider mislabeling pattern found during that
+#' investigation).
+LEVEL_LABEL_CORRECTIONS <- list(
+  "permanent_residents/840a3387__canada_adoptions_via_permanent_residence_fc6_fc9_by_country_" =
+    c(level_1_label = "Gender", level_2_label = "Country of Birth")
+)
+
+#' Apply LEVEL_LABEL_CORRECTIONS to a collected `catalog` data.frame.
+apply_label_corrections <- function(catalog) {
+  for (table_id in names(LEVEL_LABEL_CORRECTIONS)) {
+    fix <- LEVEL_LABEL_CORRECTIONS[[table_id]]
+    row <- which(catalog$table_id == table_id)
+    if (length(row) != 1) next
+    for (col in names(fix)) catalog[[col]][row] <- fix[[col]]
+  }
+  catalog
+}
+
 #' Decorator suffixes that dress up an otherwise-identical non-geographic
 #' category label across different tables of the same theme (found during
 #' the per-theme dimension map research - e.g. "Immigration Category — Pr
