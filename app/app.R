@@ -187,46 +187,32 @@ ui <- page_sidebar(
         });
       });
 
-      // Generalizes the same pattern for the Geographic Aggregation button
-      // row: greys out (native `disabled`, not just styling) whichever
-      // ranks aren't available for the current table, highlights the
-      // selected one, and pushes the server-chosen default back into
-      // input.geo_level itself (not just visual state) - the server drives
-      // this on every table switch since these are plain HTML buttons, not
-      // a native Shiny input with its own default.
-      Shiny.addCustomMessageHandler('setGeoButtons', function(msg) {
-        var buttons = {
-          national: document.getElementById('geo_btn_national'),
-          PT: document.getElementById('geo_btn_pt'),
-          CMA: document.getElementById('geo_btn_cma'),
-          CD: document.getElementById('geo_btn_cd'),
-          CSD: document.getElementById('geo_btn_csd')
-        };
-        Object.keys(buttons).forEach(function(key) {
-          var btn = buttons[key];
-          if (!btn) return;
-          var available = msg.available.indexOf(key) !== -1;
-          btn.disabled = !available;
-          btn.classList.toggle('btn-light', key === msg.selected);
-          btn.classList.toggle('btn-outline-secondary', key !== msg.selected);
+      // Greys out (native `disabled`, so it can't be clicked or tabbed to)
+      // whichever radio options in a native Shiny radioButtons group aren't
+      // valid right now - the input keeps its normal Shiny wiring (clicking
+      // an enabled option still just works via the input's own change
+      // event), this only ever removes options from being choosable.
+      function setRadioAvailability(inputName, available) {
+        document.querySelectorAll('input[name=\"' + inputName + '\"]').forEach(function(input) {
+          var ok = available.indexOf(input.value) !== -1;
+          input.disabled = !ok;
+          var label = input.closest('label') || input.parentElement;
+          if (label) label.classList.toggle('text-muted', !ok);
         });
-        Shiny.setInputValue('geo_level', msg.selected, {priority: 'event'});
+      }
+      // Which Geographic Aggregation ranks are available for the current
+      // table - the server recomputes this per table switch (see
+      // classify_level() and the current_meta() observer in app.R).
+      Shiny.addCustomMessageHandler('setGeoAvailability', function(available) {
+        setRadioAvailability('geo_level', available);
       });
-      // :not(:disabled) is re-checked live against the DOM at click time
-      // (this is a single delegated handler, not re-bound per button), so
-      // a button disabled by an earlier setGeoButtons message correctly
-      // blocks clicks even though this listener was registered once.
-      // Restyles immediately client-side on click rather than waiting on a
-      // server round-trip through setGeoButtons - that message still owns
-      // the *disabled* state (only the server knows what's available) and
-      // still fires on a table switch to reset styling to National.
-      $(document).on('click', '.geo-agg-btn:not(:disabled)', function() {
-        var rank = this.dataset.rank;
-        document.querySelectorAll('.geo-agg-btn').forEach(function(btn) {
-          btn.classList.toggle('btn-light', btn.dataset.rank === rank);
-          btn.classList.toggle('btn-outline-secondary', btn.dataset.rank !== rank);
-        });
-        Shiny.setInputValue('geo_level', rank, {priority: 'event'});
+      // Percentage of Total is meaningless (always exactly 100%) whenever
+      // Break down by is actually in effect and set to 'None' - the server
+      // recomputes this whenever the resolved fill category changes (see
+      // category_level_r() in app.R) and also resets the selection back to
+      // Absolute Values if it was on Percentage when this fires.
+      Shiny.addCustomMessageHandler('setPercentAllowed', function(allowed) {
+        setRadioAvailability('display_as', allowed ? ['absolute', 'percent'] : ['absolute']);
       });
     "))
   ),
@@ -239,19 +225,13 @@ ui <- page_sidebar(
     h6("Temporal aggregation"),
     radioButtons("granularity", NULL, choices = "Annual"),
     h6("Geographic Aggregation"),
-    div(
-      class = "d-flex flex-wrap gap-1 mb-2",
-      tags$button("National", id = "geo_btn_national", type = "button",
-                  class = "btn btn-sm geo-agg-btn btn-light", `data-rank` = "national"),
-      tags$button("Province/Territory", id = "geo_btn_pt", type = "button",
-                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "PT"),
-      tags$button("CMA", id = "geo_btn_cma", type = "button",
-                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CMA"),
-      tags$button("CD", id = "geo_btn_cd", type = "button",
-                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CD"),
-      tags$button("CSD", id = "geo_btn_csd", type = "button",
-                  class = "btn btn-sm geo-agg-btn btn-outline-secondary", `data-rank` = "CSD")
-    ),
+    radioButtons("geo_level", NULL, choices = c(
+      "National" = "national",
+      "Province/Territory" = "PT",
+      "CMA" = "CMA",
+      "CD" = "CD",
+      "CSD" = "CSD"
+    ), selected = "national"),
     conditionalPanel(
       "input.geo_level != 'national'",
       h6("Geographic unit"),
@@ -358,8 +338,8 @@ server <- function(input, output, session) {
 
     cl <- level_classification()
     available_ranks <- unique(stats::na.omit(cl$geo_rank))
-    session$sendCustomMessage("setGeoButtons",
-                               list(available = c("national", available_ranks), selected = "national"))
+    session$sendCustomMessage("setGeoAvailability", c("national", available_ranks))
+    updateRadioButtons(session, "geo_level", selected = "national")
 
     cat_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
     cat_choices <- c("none", as.character(cat_rows$level_index))
@@ -393,6 +373,39 @@ server <- function(input, output, session) {
     updateSelectizeInput(session, "geo_unit", choices = units, selected = "All", server = TRUE)
   }, ignoreInit = TRUE)
 
+  # Routing rule: geography is the chart's fill dimension only when a real
+  # rank is picked AND no specific unit narrows it - otherwise Break down
+  # by (or "none"/Total) is the fill, and a specific unit (if any) becomes
+  # a row filter instead (see plot_data() below). Exactly one axis is ever
+  # the fill; never both, never faceted. Pulled out of plot_data() into its
+  # own reactive so the Percentage-of-Total gating observer below can react
+  # to the same resolved fill category without duplicating this logic.
+  category_level_r <- reactive({
+    cl <- level_classification()
+    geo_unit <- input$geo_unit %||% "All"
+    cat_level <- input$cat_level %||% "none"
+    geo_real <- !identical(input$geo_level, "national")
+    geo_all_units <- identical(geo_unit, "All")
+    if (geo_real && geo_all_units) {
+      as.character(cl$level_index[match(input$geo_level, cl$geo_rank)])
+    } else {
+      cat_level
+    }
+  })
+
+  # Percentage of Total is meaningless (every bar would be exactly 100%)
+  # whenever the resolved fill category is "None"/Total - only geography
+  # (when it's the fill) or a real Break-down-by selection ever have more
+  # than one segment to take a percentage of.
+  observe({
+    category_level <- category_level_r()
+    allow_percent <- !(identical(category_level, "none") || identical(category_level, "total"))
+    session$sendCustomMessage("setPercentAllowed", allow_percent)
+    if (!allow_percent && identical(input$display_as, "percent")) {
+      updateRadioButtons(session, "display_as", selected = "absolute")
+    }
+  })
+
   plot_data <- reactive({
     m <- current_meta()
     req(input$granularity, input$years, input$top_n, input$geo_level)
@@ -400,22 +413,11 @@ server <- function(input, output, session) {
     valid_granularity <- if (isTRUE(m$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
     req(input$granularity %in% valid_granularity)
 
-    cl <- level_classification()
     geo_unit <- input$geo_unit %||% "All"
-    cat_level <- input$cat_level %||% "none"
     geo_real <- !identical(input$geo_level, "national")
     geo_all_units <- identical(geo_unit, "All")
 
-    # Routing rule: geography is the chart's fill dimension only when a
-    # real rank is picked AND no specific unit narrows it - otherwise
-    # Break down by (or "none"/Total) is the fill, and a specific unit (if
-    # any) becomes a row filter instead. Exactly one axis is ever the fill;
-    # never both, never faceted.
-    category_level <- if (geo_real && geo_all_units) {
-      as.character(cl$level_index[match(input$geo_level, cl$geo_rank)])
-    } else {
-      cat_level
-    }
+    category_level <- category_level_r()
     category_level_label <- if (identical(category_level, "none") || identical(category_level, "total")) {
       NULL
     } else {

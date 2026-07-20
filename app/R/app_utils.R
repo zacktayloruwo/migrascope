@@ -16,6 +16,12 @@ PROVINCE_ORDER_WEST_TO_EAST <- c(
 #' which palette is otherwise in use.
 OTHER_COLOR <- "#8c8c8c"
 
+#' Fixed colour for a literal "NA" category (missing/unstated dimension
+#' value in the source data, distinct from the real "Not stated" category
+#' text some tables use) - light grey, lighter than OTHER_COLOR since it
+#' represents missingness rather than a deliberate residual bucket.
+NA_COLOR <- "#d9d9d9"
+
 #' Standard two-letter postal abbreviations, used to disambiguate Census
 #' Division/Subdivision names that recur across provinces (e.g. more than
 #' one "Windsor") - see fetch_leaf_rows().
@@ -34,10 +40,10 @@ PROVINCE_ABBR <- c(
 CENSUS_GEO_LABELS <- c("Census Division", "Census Subdivision")
 
 #' Fixed colour for the "Suppressed Residual" pseudo-category (see
-#' build_plot_data()) - distinct from OTHER_COLOR so it's never confused
-#' with the "Other" bucket; "Other" folds together real, known values,
-#' while this segment represents values IRCC/IRB never published at all.
-SUPPRESSED_COLOR <- "#b0413e"
+#' build_plot_data()) - black, so it reads as categorically different from
+#' every real/"Other"/"NA" category rather than just another palette hue;
+#' this segment represents values IRCC/IRB never published at all.
+SUPPRESSED_COLOR <- "#000000"
 
 #' Ordered regex -> geographic-rank lookup, most-specific-first (mirrors
 #' GENERAL_ABBREV's "(CMA)" before bare "Census Metropolitan Area"
@@ -419,16 +425,17 @@ order_categories <- function(cat_totals_desc) {
 }
 
 #' Build a name -> colour mapping for a set of ordered category factor
-#' levels: "Other" is always OTHER_COLOR and "Suppressed Residual" is
-#' always SUPPRESSED_COLOR regardless of position, the rest are drawn from
-#' a fixed gradient in level order.
+#' levels: "Other" is always OTHER_COLOR, "NA" is always NA_COLOR, and
+#' "Suppressed Residual" is always SUPPRESSED_COLOR regardless of
+#' position, the rest are drawn from a fixed gradient in level order.
 category_colors <- function(levels_in_order) {
-  non_other <- setdiff(levels_in_order, c("Other", "Suppressed Residual"))
+  non_other <- setdiff(levels_in_order, c("Other", "Suppressed Residual", "NA"))
   pal <- grDevices::colorRampPalette(
     c("#0b4f6c", "#1d7874", "#679436", "#a5be00", "#e2c044", "#e58606", "#cc503e")
   )(length(non_other))
   colors <- stats::setNames(pal, non_other)
   if ("Other" %in% levels_in_order) colors[["Other"]] <- OTHER_COLOR
+  if ("NA" %in% levels_in_order) colors[["NA"]] <- NA_COLOR
   if ("Suppressed Residual" %in% levels_in_order) colors[["Suppressed Residual"]] <- SUPPRESSED_COLOR
   colors[levels_in_order]
 }
