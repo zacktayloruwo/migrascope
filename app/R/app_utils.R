@@ -632,6 +632,25 @@ derive_series_label <- function(table_title, dataset, level_labels) {
   if (nchar(x) < 3) "" else x
 }
 
+#' Read one of the hand-editable "(custom)" name-override columns (see
+#' build_theme_dimension_map()'s series_label_lookup/breakdown_label_lookup
+#' params) out of an Excel Table - data/series_names.xlsx (`key_col =
+#' "table_id"`, `custom_col = "Series (custom)"`) or
+#' data/breakdown_names.xlsx (`key_col = "Breakdown item (auto)"`,
+#' `custom_col = "Breakdown item (custom)"`). Only non-blank values become
+#' overrides; a missing file (e.g. a fresh checkout before the pipeline's
+#' been run once) just means no overrides are active, not an error. Used
+#' by both app.R (to drive the live app) and
+#' data-raw/07_build_series_reference.R (so the reference report reflects
+#' the same overrides the app actually shows).
+read_custom_name_lookup <- function(path, key_col, custom_col) {
+  if (!file.exists(path)) return(character())
+  d <- readxl::read_excel(path, sheet = 1)
+  custom <- trimws(as.character(d[[custom_col]]))
+  keep <- !is.na(custom) & nzchar(custom)
+  stats::setNames(custom[keep], d[[key_col]][keep])
+}
+
 #' Build the per-table dimension map every Geo/Category/Series selector in
 #' app.R is driven from - one row per table_id in `catalog` (genuinely-
 #' redundant duplicate tables are dropped upstream, at database-creation

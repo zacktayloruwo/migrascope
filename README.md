@@ -59,6 +59,8 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
 
 7.  **`data-raw/06_build_label_lookups.R`** — (re)generates two editable Excel Tables app.R reads at startup: `app/data/series_names.xlsx` (`table_id` → `Series (custom)`, overriding `derive_series_label()`'s guess for one specific table) and `app/data/breakdown_names.xlsx` (`Breakdown item (auto)` → `(custom)`, renaming a normalized category everywhere at once - the Break down by list, Series matching, and the chart's category axis). Hand edits to either "(custom)" column survive a re-run (matched by `table_id` / `Breakdown item (auto)` respectively) so a one-off tweak doesn't need to be re-applied after every refresh.
 
+8.  **`data-raw/07_build_series_reference.R`** — (re)generates `reports/series_reference.xlsx`, a read-only reference table of every Series the app can show: one row per (Series × Geographic Aggregation level × Temporal Aggregation level), with that Series' Theme, available Breakdown items, and the full source table title exactly as it appears in the app's own citation (not `catalog$table_title`, which can carry an internal multi-sheet suffix the citation doesn't show). Reflects the *same* `series_names.xlsx`/`breakdown_names.xlsx` overrides the live app applies, so it's a snapshot of what a user actually sees - not consumed by the app itself, just a standalone report for humans.
+
 Run from the project root:
 
 ``` r
@@ -69,6 +71,7 @@ source("data-raw/03_process_tables.R")
 source("data-raw/04_validate_tables.R")
 source("data-raw/05_build_duckdb.R")
 source("data-raw/06_build_label_lookups.R")
+source("data-raw/07_build_series_reference.R")
 ```
 
 ``` sh
@@ -100,7 +103,7 @@ The bottom of the plot card cites the displayed table's original CKAN resource(s
 
 ## Refreshing
 
-IRCC republishes its files roughly monthly; IRB republishes `rpd_decisions` roughly quarterly (`rpd_1997_2021` is a static one-off, it won't change). To pick up the latest data (and any newly-added tables), just re-run the scripts above in order — `01_build_manifest.R` re-derives the table list from the live CKAN API in case a new breakdown was added, `02_download_data.R` skips resources whose CKAN timestamp hasn't changed (and hash-compares anything it does fetch), `03_process_tables.R` reprocesses everything (cheap - a few minutes for all tables), `04_validate_tables.R` re-runs the consistency checks (the slowest step - several minutes, dominated by a handful of tables with 500k+ rows), `05_build_duckdb.R` rebuilds the app's database (a couple of minutes), and `06_build_label_lookups.R` refreshes the `series_names.xlsx`/`breakdown_names.xlsx` lookups - adding rows for any newly-added table/category without touching hand-edited "(custom)" values for existing ones. All three write straight into `app/data/`. The running Shiny app picks up a rebuilt `app/data/immigration.duckdb`, `series_names.xlsx`, and `breakdown_names.xlsx` on its next restart (it opens one read-only connection at startup).
+IRCC republishes its files roughly monthly; IRB republishes `rpd_decisions` roughly quarterly (`rpd_1997_2021` is a static one-off, it won't change). To pick up the latest data (and any newly-added tables), just re-run the scripts above in order — `01_build_manifest.R` re-derives the table list from the live CKAN API in case a new breakdown was added, `02_download_data.R` skips resources whose CKAN timestamp hasn't changed (and hash-compares anything it does fetch), `03_process_tables.R` reprocesses everything (cheap - a few minutes for all tables), `04_validate_tables.R` re-runs the consistency checks (the slowest step - several minutes, dominated by a handful of tables with 500k+ rows), `05_build_duckdb.R` rebuilds the app's database (a couple of minutes), `06_build_label_lookups.R` refreshes the `series_names.xlsx`/`breakdown_names.xlsx` lookups - adding rows for any newly-added table/category without touching hand-edited "(custom)" values for existing ones - and `07_build_series_reference.R` regenerates the `reports/series_reference.xlsx` snapshot from the (possibly just-updated) lookups. The first three of those write straight into `app/data/`; the running Shiny app picks up a rebuilt `app/data/immigration.duckdb`, `series_names.xlsx`, and `breakdown_names.xlsx` on its next restart (it opens one read-only connection at startup). `series_reference.xlsx` is a standalone report, not read by the app.
 
 ## Layout
 
@@ -132,6 +135,7 @@ data-raw/downloads/                     # raw Excel/CSV files, gitignored (regen
 data/processed/<dataset>/               # tidy long + wide CSVs, gitignored (regenerate via 03_process_tables.R) - a data-prep intermediate, not read by the app
 reports/data_quality_report.qmd         # validation report source
 reports/data_quality_report.pdf         # rendered report (regenerate via quarto render)
+reports/series_reference.xlsx           # every Series' Theme/Breakdown items/Geographic+Temporal Aggregation/citation title (regenerate via data-raw/07_build_series_reference.R) - not read by the app
 ```
 
 ## Deploying to shinyapps.io

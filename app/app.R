@@ -68,16 +68,9 @@ catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 # which regenerates the "(auto)" columns on every pipeline refresh while
 # preserving whatever's already typed into "(custom)" - same
 # survives-a-refresh spirit the old table_short_labels.xlsx short_label
-# column used). Only non-blank "(custom)" values become overrides; a
-# missing file (e.g. a fresh checkout before the pipeline's been run once)
-# just means no overrides are active, not an error.
-read_custom_name_lookup <- function(path, key_col, custom_col) {
-  if (!file.exists(path)) return(character())
-  d <- read_excel(path, sheet = 1)
-  custom <- trimws(as.character(d[[custom_col]]))
-  keep <- !is.na(custom) & nzchar(custom)
-  stats::setNames(custom[keep], d[[key_col]][keep])
-}
+# column used). read_custom_name_lookup() lives in app_utils.R so
+# data-raw/07_build_series_reference.R can reuse it to build a reference
+# report that reflects these same overrides.
 series_label_lookup <- read_custom_name_lookup("data/series_names.xlsx", "table_id", "Series (custom)")
 breakdown_label_lookup <- read_custom_name_lookup("data/breakdown_names.xlsx", "Breakdown item (auto)", "Breakdown item (custom)")
 
