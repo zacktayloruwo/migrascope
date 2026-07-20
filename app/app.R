@@ -151,8 +151,8 @@ ui <- page_sidebar(
   # from it otherwise, which would pull in the button labels too.
   window_title = "Canadian Immigration Statistics Visualizer",
   theme = bs_theme(version = 5, primary = "#0b4f6c",
-                    base_font = font_google("Noto Sans"),
-                    heading_font = font_google("Noto Serif")),
+                    base_font = font_google("Roboto"),
+                    heading_font = font_google("Roboto")),
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
     # Highlights whichever of the two nav buttons matches the current
@@ -211,6 +211,18 @@ ui <- page_sidebar(
     width = 340,
     h6("Select Theme"),
     selectInput("theme", NULL, choices = THEME_CHOICES),
+    # Only rendered when the current Geo/Category selection still leaves
+    # more than one table_id to choose from (a genuine data ambiguity that
+    # can't be expressed via geography/category/time alone - see
+    # match_candidates() in R/app_utils.R) - `series_needed` is a plain
+    # boolean pushed from the server (see the `setSeriesNeeded` handler
+    # above), true only in that case. In the common case (one candidate)
+    # this never renders.
+    conditionalPanel(
+      "input.series_needed",
+      h6("Series"),
+      selectInput("series", NULL, choices = NULL)
+    ),
     h6("Temporal aggregation"),
     radioButtons("granularity", NULL, choices = "Annual"),
     h6("Geographic Aggregation"),
@@ -230,18 +242,6 @@ ui <- page_sidebar(
       "input.geo_level == 'national' || input.geo_unit != 'All'",
       h6("Break down by"),
       selectInput("cat_level", NULL, choices = c("None" = "none"))
-    ),
-    # Only rendered when the current Geo/Category selection still leaves
-    # more than one table_id to choose from (a genuine data ambiguity that
-    # can't be expressed via geography/category/time alone - see
-    # match_candidates() in R/app_utils.R) - `series_needed` is a plain
-    # boolean pushed from the server (see the `setSeriesNeeded` handler
-    # above), true only in that case. In the common case (one candidate)
-    # this never renders.
-    conditionalPanel(
-      "input.series_needed",
-      h6("Series"),
-      selectInput("series", NULL, choices = NULL)
     ),
     h6("Display as"),
     radioButtons("display_as", NULL,

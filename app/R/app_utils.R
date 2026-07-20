@@ -398,16 +398,48 @@ collapse_to_top_n <- function(d, top_n) {
     dplyr::summarise(value = sum(.data$value, na.rm = TRUE), .groups = "drop")
 }
 
-#' Determine category display order: west-to-east if the categories look
-#' like a province/territory breakdown (at least half, and at least 3, are
-#' recognized Canadian provinces/territories - any unrecognized values,
-#' e.g. "Province/Territory not stated", are kept but appended after the
-#' recognized ones); otherwise the pre-existing convention of ascending
-#' total value. "Other" (the residual bucket from `collapse_to_top_n()`)
-#' is always included, positioned to match whichever convention applies.
+#' A category label that names an ordinal cohort/bucket range - age groups
+#' ("0 to 14 years old", "60 to 74 years of age"), years-since-arrival
+#' buckets, etc - starts with a number. Sorting these as plain text would
+#' put "15 to 29" before "0 to 14"; sorting by total value scrambles the
+#' bucket order entirely. Matched on the LEADING number only, so
+#' e.g. "0 to 14 years old" and "60 to 74 years of age" both match.
+#' Matches (and captures) the leading number, consuming the rest of the
+#' string too - sub() only replaces what the pattern matches, not
+#' match-to-end, so extracting just the number via sub(..., "\\1") needs
+#' the trailing `.*$` or the replacement leaves the rest of the label
+#' stuck onto the captured digits.
+ORDINAL_COHORT_REGEX <- "^\\s*(\\d+).*$"
+
+#' Is this set of (non-"Other"/"NA"/"Suppressed Residual") category labels
+#' an ordinal cohort breakdown? A majority match is enough (mirrors the
+#' geographic heuristic below) - a stray non-numeric value like "Age not
+#' stated" alongside real buckets shouldn't disqualify the whole set from
+#' being sorted low-to-high.
+is_ordinal_cohort <- function(labels) {
+  length(labels) > 0 &&
+    sum(grepl(ORDINAL_COHORT_REGEX, labels)) >= max(2, ceiling(length(labels) / 2))
+}
+
+#' Determine category display order:
+#'  - west-to-east if the categories look like a province/territory
+#'    breakdown (at least half, and at least 3, are recognized Canadian
+#'    provinces/territories - any unrecognized values, e.g. "Province/
+#'    Territory not stated", are kept but appended after the recognized
+#'    ones);
+#'  - low-to-high if they look like an ordinal cohort/age-group breakdown
+#'    (see is_ordinal_cohort()) - any non-numeric-leading stragglers sort
+#'    alphabetically after the numeric ones;
+#'  - otherwise plain alphabetical.
+#' "NA" (a literal missing-value category), "Other" (the residual bucket
+#' from collapse_to_top_n()), and "Suppressed Residual" are never sorted
+#' among the "real" categories above - they're always moved to the right
+#' end of the legend, in that fixed relative order, regardless of which
+#' convention applied to everything else.
 order_categories <- function(cat_totals_desc) {
-  non_other <- cat_totals_desc$category[cat_totals_desc$category != "Other"]
-  has_other <- "Other" %in% cat_totals_desc$category
+  all_cats <- cat_totals_desc$category
+  trailing <- intersect(c("NA", "Other", "Suppressed Residual"), all_cats)
+  non_other <- setdiff(all_cats, trailing)
 
   recognized <- intersect(PROVINCE_ORDER_WEST_TO_EAST, non_other)
   is_geographic <- length(non_other) > 0 &&
@@ -416,12 +448,16 @@ order_categories <- function(cat_totals_desc) {
   if (is_geographic) {
     unrecognized <- setdiff(non_other, PROVINCE_ORDER_WEST_TO_EAST)
     ordered <- c(recognized, unrecognized)
-    if (has_other) ordered <- c(ordered, "Other")
+  } else if (is_ordinal_cohort(non_other)) {
+    is_numeric <- grepl(ORDINAL_COHORT_REGEX, non_other)
+    numeric_part <- non_other[is_numeric]
+    numeric_part <- numeric_part[order(as.numeric(sub(ORDINAL_COHORT_REGEX, "\\1", numeric_part, perl = TRUE)))]
+    ordered <- c(numeric_part, sort(non_other[!is_numeric]))
   } else {
-    ordered <- rev(non_other) # ascending total value
-    if (has_other) ordered <- c("Other", ordered)
+    ordered <- sort(non_other)
   }
-  ordered
+
+  c(ordered, trailing)
 }
 
 #' Build a name -> colour mapping for a set of ordered category factor
