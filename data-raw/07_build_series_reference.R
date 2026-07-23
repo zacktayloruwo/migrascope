@@ -7,11 +7,13 @@
 # catalog$table_title, which can carry an internal multi-sheet suffix the
 # citation doesn't show).
 #
-# Reflects the SAME series_names.xlsx/breakdown_names.xlsx "(custom)"
-# overrides the live app applies (see app.R and
-# app/R/app_utils.R::read_custom_name_lookup()) - this is a snapshot of
-# what a user actually sees, not the raw auto-derived defaults (that's
-# what data-raw/06_build_label_lookups.R's own "(auto)" columns are for).
+# Reads `catalog` directly - by the time 05_build_duckdb.R and
+# 06_build_label_lookups.R have both run, `catalog$level_N_label`/
+# `catalog$series_label` already reflect every hand-typed correction in
+# app/data/label_overrides.xlsx (baked in at database-creation time - see
+# that script and app/R/app_utils.R::build_theme_dimension_map()), so this
+# is a snapshot of what a user actually sees, not the raw auto-derived
+# defaults.
 #
 # Not consumed by the app itself - a standalone report for humans, safe to
 # regenerate any time after 05_build_duckdb.R/06_build_label_lookups.R.
@@ -20,7 +22,6 @@ library(DBI)
 library(duckdb)
 library(dplyr)
 library(openxlsx)
-library(readxl)
 
 # app_utils.R lives under app/ (it's app.R's own query/rendering helper
 # file) rather than being duplicated here.
@@ -30,7 +31,7 @@ DB_PATH <- "app/data/immigration.duckdb"
 OUT_PATH <- "reports/series_reference.xlsx"
 
 if (!file.exists(DB_PATH)) {
-  stop("app/data/immigration.duckdb not found - run data-raw/05_build_duckdb.R first")
+  stop("app/data/immigration.duckdb not found - run data-raw/05_build_duckdb.R then data-raw/06_build_label_lookups.R first")
 }
 
 DATASET_LABELS <- c(
@@ -48,11 +49,7 @@ con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 dbDisconnect(con, shutdown = TRUE)
 
-series_label_lookup <- read_custom_name_lookup("app/data/series_names.xlsx", "table_id", "Series (custom)")
-breakdown_label_lookup <- read_custom_name_lookup("app/data/breakdown_names.xlsx", "Breakdown item (auto)",
-                                                   "Breakdown item (custom)")
-dim_map <- build_theme_dimension_map(catalog, series_label_lookup = series_label_lookup,
-                                      breakdown_label_lookup = breakdown_label_lookup)
+dim_map <- build_theme_dimension_map(catalog)
 
 # ---- full citation title, same source app.R's table_citation_ui() uses --
 # catalog$table_title is title_for_slug()'s pipeline-internal title (e.g.
@@ -61,27 +58,15 @@ dim_map <- build_theme_dimension_map(catalog, series_label_lookup = series_label
 # built from app/data/source_manifest.csv's own table_name field via
 # build_source_lookup(). For synthetic/derived tables (no hash match, e.g.
 # the merged refugees table) the app falls back to citing every sibling
-# source table within the same theme - replicated here.
+# source table within the same theme - see citation_title_for() in
+# app/R/app_utils.R.
 manifest <- readr::read_csv("app/data/source_manifest.csv", show_col_types = FALSE,
                              col_types = readr::cols(last_modified_ckan = "c"))
 source_lookup <- build_source_lookup(manifest)
 
-citation_title_for <- function(table_id, sibling_ids) {
-  hash <- extract_table_hash(table_id)
-  hashes <- if (!is.na(hash)) {
-    hash
-  } else {
-    sibling_hashes <- vapply(sibling_ids, extract_table_hash, character(1))
-    unique(sibling_hashes[!is.na(sibling_hashes)])
-  }
-  rows <- source_lookup[source_lookup$hash %in% hashes, , drop = FALSE]
-  if (nrow(rows) == 0) return(NA_character_)
-  paste(unique(rows$table_name), collapse = "; ")
-}
-
 citation_title <- vapply(seq_len(nrow(dim_map)), function(i) {
   sibling_ids <- catalog$table_id[catalog$dataset == dim_map$dataset[i]]
-  citation_title_for(dim_map$table_id[i], sibling_ids)
+  citation_title_for(dim_map$table_id[i], sibling_ids, source_lookup)
 }, character(1))
 
 breakdown_col <- vapply(dim_map$categories, function(x) {

@@ -84,10 +84,26 @@ GENERIC_CATCHALL_VALUES <- c("not stated", "unknown", "n/a", "na")
 #' distinct remaining values (so a single-value column, most often already
 #' filtered down to one entity, can't false-positive at 100%).
 CONTENT_LABEL_MATCHERS <- list(
+  # Unlike Gender/Age Group below, a single-value Province/Territory column
+  # is still trusted at full confidence (min length 1, not 2) - discovered
+  # in permanent_residents/2d5c04fe ("Quebec - English-Speaking Permanent
+  # Residents by Immigration Category"): the table's own level_1 is a
+  # constant "Quebec" (the whole table is pre-filtered to one province, so
+  # there's only ever one distinct value), and the length>=2 guard existing
+  # matchers use to avoid a coincidental single-value false-positive was
+  # silently starving this column of any content signal at all, letting the
+  # title's misattributed "Immigration Category" label stick to it instead
+  # (see resolve_level_labels()'s generic-placeholder promotion below for
+  # how the real "Immigration Category" label then correctly flows to
+  # level_2 once this position is confidently reclassified). A single value
+  # that happens to be an exact match against this small, closed, 13-name
+  # vocabulary is a strong enough signal on its own; the false-positive risk
+  # the length-2 guard defends against doesn't really apply to a vocabulary
+  # this specific.
   "Province/Territory" = function(vals) {
     vals <- unique(trimws(vals[!is.na(vals)]))
     vals <- vals[!tolower(vals) %in% GENERIC_CATCHALL_VALUES]
-    if (length(vals) < 2) return(0)
+    if (length(vals) < 1) return(0)
     mean(vals %in% PROVINCE_TERRITORY_NAMES)
   },
   "Gender" = function(vals) {
@@ -122,6 +138,96 @@ classify_level_content <- function(values) {
   scores <- vapply(CONTENT_LABEL_MATCHERS, function(f) f(values), numeric(1))
   best <- which.max(scores)
   if (scores[best] >= CONTENT_MATCH_THRESHOLD) names(CONTENT_LABEL_MATCHERS)[best] else NA_character_
+}
+
+#' Which single closed vocabulary (if any) one *individual* value belongs
+#' to - the per-value counterpart to CONTENT_LABEL_MATCHERS (which score a
+#' whole column at once). Used by drop_cross_vocabulary_rows() below to
+#' tell apart a column's real, majority dimension from a smaller stray one
+#' that happens to share the column.
+value_vocab <- function(v) {
+  if (v %in% PROVINCE_TERRITORY_NAMES) return("Province/Territory")
+  vl <- tolower(v)
+  if (vl %in% c("male", "female", "another gender", "gender not stated", "gender x")) return("Gender")
+  if (grepl("years?\\s*old|^\\d+\\s*(to|-)\\s*\\d+$", v, ignore.case = TRUE)) return("Age Group")
+  NA_character_
+}
+
+#' Detect and drop rows whose value in a level_N column belongs to a
+#' different closed vocabulary (PROVINCE_TERRITORY_NAMES/Gender/Age Group
+#' - see value_vocab()) than the vocabulary the rest of that column's rows
+#' overwhelmingly belong to. Discovered in
+#' temporary_workers/08d3441d ("...by gender, age and year..."): its
+#' level_1 is genuinely the Gender axis (with Age nested under it at
+#' level_2 for the real leaf rows), but the source sheet *also* publishes
+#' a second, independent "by Age" marginal as more subtotal rows in that
+#' same level_1 column - true_leaf_rows() (app/R/app_utils.R) has no way
+#' to tell those apart from a genuine ragged branch and promotes them as
+#' bogus extra "Gender" categories (literal age ranges alongside Male/
+#' Female/...). Only the minority vocabulary's rows are dropped - that
+#' content is redundant anyway (derivable by summing the table's own real
+#' nested breakdown), so nothing is lost; the majority vocabulary, and any
+#' value matching no closed vocabulary at all (most dimensions - the
+#' overwhelming majority of columns are untouched), are left alone.
+drop_cross_vocabulary_rows <- function(long, level_cols, table_id) {
+  for (col in level_cols) {
+    vals_all <- long[[col]]
+    distinct_vals <- unique(trimws(vals_all[!is.na(vals_all)]))
+    checkable <- distinct_vals[!tolower(distinct_vals) %in% GENERIC_CATCHALL_VALUES]
+    if (length(checkable) < 2) next
+
+    voc <- vapply(checkable, value_vocab, character(1), USE.NAMES = FALSE)
+    if (length(unique(stats::na.omit(voc))) < 2) next
+
+    voc_lookup <- stats::setNames(voc, checkable)
+    row_voc <- unname(voc_lookup[trimws(vals_all)])
+    majority <- names(which.max(table(row_voc)))
+    drop_vals <- checkable[!is.na(voc) & voc != majority]
+    if (length(drop_vals) == 0) next
+
+    n_dropped <- sum(trimws(vals_all) %in% drop_vals, na.rm = TRUE)
+    cli::cli_alert_warning(
+      "{table_id}: dropping {n_dropped} row(s) from {col} where the value belongs to a different closed vocabulary than the column's real ({majority}) axis: {paste(drop_vals, collapse = ', ')}"
+    )
+    long <- long[is.na(vals_all) | !(trimws(vals_all) %in% drop_vals), , drop = FALSE]
+  }
+  long
+}
+
+#' Literal category values that are actually a mislabeled grand total, not a
+#' real member of the dimension they sit in - discovered in the four "by
+#' Country of Citizenship" tables (study_permit_holders/b505b9bc,
+#' study_permit_holders/3897ef92, temporary_workers/f2696d77,
+#' temporary_workers/2e910f7d), each of which publishes a "Total unique
+#' persons" row at row_level 1 alongside every real country, with
+#' is_row_subtotal FALSE - i.e. not flagged as a subtotal at all, just one
+#' more "country" as far as row_level/is_row_subtotal can tell. Confirmed
+#' via direct value comparison (2020, study_permit_holders/b505b9bc): the
+#' "Total unique persons" row (798,425) is within suppression-noise of the
+#' sum of every real country row that year (796,870) - i.e. it really is
+#' the table's own grand total, not a genuine "unique persons" breakdown
+#' category. Left in, it inflates any query that sums leaf categories
+#' (double-counting the whole table's total on top of its real countries)
+#' and would itself show up as a bogus "country" in the Break down by
+#' selector.
+BOGUS_TOTAL_ROW_VALUES <- c("total unique persons")
+
+#' Drop rows whose value in a level_N column is one of BOGUS_TOTAL_ROW_VALUES
+#' - a grand total published as if it were a real category value (see that
+#' constant's comment). Unlike drop_cross_vocabulary_rows(), this isn't about
+#' two real vocabularies sharing a column; it's a single always-wrong literal
+#' value.
+drop_bogus_total_rows <- function(long, level_cols, table_id) {
+  for (col in level_cols) {
+    vals_all <- trimws(long[[col]])
+    is_bogus <- !is.na(vals_all) & tolower(vals_all) %in% BOGUS_TOTAL_ROW_VALUES
+    if (!any(is_bogus)) next
+    cli::cli_alert_warning(
+      "{table_id}: dropping {sum(is_bogus)} row(s) from {col} where the value ({paste(unique(vals_all[is_bogus]), collapse = ', ')}) is a mislabeled grand total, not a real category"
+    )
+    long <- long[!is_bogus, , drop = FALSE]
+  }
+  long
 }
 
 #' Cheap keyword check for whether a title-derived label already
@@ -208,6 +314,29 @@ resolve_level_labels <- function(title_labels, content_labels) {
     }
   }
 
+  # A position still holding guess_level_labels()'s generic "Category Level
+  # N" fallback (the title's by-phrase didn't name this many dimensions)
+  # and with no independent content opinion of its own has nothing of its
+  # own to lose - if some OTHER position's real title phrase is being
+  # displaced by a confident content match elsewhere, this position should
+  # be first in line to receive it, rather than staying stuck with a
+  # meaningless placeholder while the real phrase goes unclaimed (case:
+  # permanent_residents/2d5c04fe, a "Quebec"-only table whose title says
+  # just "by Immigration Category" - guess_level_labels() attaches that one
+  # real phrase to level_1 positionally, leaving level_2 with "Category
+  # Level 2"; content correctly reclassifies level_1 as Province/Territory
+  # from its literal "Quebec" values, but level_2's own placeholder text
+  # mentions no keyword at all, so the keyword-donor check above never
+  # marks it conflicted on its own - without this rule "Immigration
+  # Category" would be stranded at the reclaimed level_1 position instead
+  # of flowing to level_2, where it belongs). Only applied when something
+  # is already conflicted (an actual displaced phrase exists to redistribute
+  # in the first place) - a table with no conflicts at all is left alone.
+  if (any(conflicted)) {
+    is_generic <- grepl("^Category Level \\d+$", title_labels)
+    conflicted <- conflicted | (is_generic & is.na(content_labels))
+  }
+
   if (!any(conflicted)) return(title_labels)
 
   final <- title_labels
@@ -240,6 +369,8 @@ normalize_table <- function(long, table_id, dataset, table_title) {
 
   if (is_pivot) {
     level_cols <- grep("^level_[0-9]+$", names(long), value = TRUE)
+    long <- drop_cross_vocabulary_rows(long, level_cols, table_id)
+    long <- drop_bogus_total_rows(long, level_cols, table_id)
     n_levels <- length(level_cols)
     title_labels <- guess_level_labels(table_title, n_levels)
     # Check the real data before trusting the title's word order - see

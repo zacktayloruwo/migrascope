@@ -1,23 +1,33 @@
 # Canadian Immigration Statistics — Shiny app
 #
-# One theme ("dataset") selected via a sidebar pulldown. Each theme has its
-# own set of data tables (a specific breakdown, e.g. "by Province and
-# Gender"), a temporal aggregation (Monthly / Quarterly / Annual, limited to
-# what that table actually supports), and a category breakdown level - then
-# renders a stacked longitudinal bar chart.
+# One theme ("dataset") selected via a sidebar pulldown. Each theme has one
+# or more Series (a genuinely distinct population/program/metric, e.g.
+# "All admissions" vs "Adoptions via PR") - always shown, since with
+# duplication resolved at the pipeline level (see below) there's no longer
+# any per-query table ambiguity left for a hidden selector to resolve.
+# Within a Series: a temporal aggregation (Monthly / Quarterly / Annual,
+# limited to what that series actually supports), a Geographic Aggregation
+# level, and a category breakdown (Break down by, with up to two more
+# "drill into..." levels when a facet nests that deep) - then renders a
+# stacked longitudinal bar chart.
 #
 # This directory (app/) is the self-contained deployment unit for
 # shinyapps.io (`rsconnect::deployApp("app")`) - everything it reads is
 # inside app/, nothing reaches back into the data-prep tree one level up.
 #
 # Data comes from data/immigration.duckdb - built by the data-prep pipeline
-# at the repo root (../data-raw/05_build_duckdb.R from ../data/processed/)
-# and copied here, not generated in place. See ../README.md for the full
-# pipeline; that file also (re)writes data/series_names.xlsx,
-# data/breakdown_names.xlsx, and data/source_manifest.csv, this app's other
-# data inputs besides the duckdb itself. The duckdb has a `facts` table
-# (unified schema across all source tables - see ../R/duckdb_utils.R) and a
-# `catalog` table describing each table's dimensions.
+# at the repo root (../data-raw/05_build_duckdb.R -> 06_build_label_lookups.R
+# -> 08_build_series_facts.R) and copied here, not generated in place. See
+# ../README.md for the full pipeline. This app reads exactly one table from
+# it, `series_facts`: one row per genuinely distinct (theme, series,
+# breakdown facet/depth, geography, period) fact, already deduplicated
+# across every raw source table that contributes to it - many tables
+# within one series independently publish the same underlying total (e.g.
+# a province's grand total, once broken down by Sex, once by Occupation,
+# once by CD/CSD) with slightly different suppression, and that
+# duplication is resolved once, at the row level, by
+# data-raw/08_build_series_facts.R - not here. This app never reads the
+# raw `facts`/`catalog` tables that `series_facts` was built from.
 
 library(shiny)
 library(bslib)
@@ -34,7 +44,6 @@ library(dbplyr)
 library(plotly)
 library(ggplot2)
 library(scales)
-library(readxl)
 
 source("R/app_utils.R")
 
@@ -61,30 +70,17 @@ THEME_CHOICES <- setNames(names(DATASET_LABELS), DATASET_LABELS)
 con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 onStop(function() dbDisconnect(con, shutdown = TRUE))
 
-catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
+# ---- series summary ---------------------------------------------------------
+# One row per (theme, series, facet, geo_level) combination actually present
+# in series_facts - what every selector in the sidebar is driven from.
+# Computed once at startup (like `catalog` used to be) - see
+# build_series_summary() in R/app_utils.R.
+series_summary <- build_series_summary(con)
 
-# ---- editable name overrides ----------------------------------------------
-# Two hand-editable Excel Tables (see data-raw/06_build_label_lookups.R,
-# which regenerates the "(auto)" columns on every pipeline refresh while
-# preserving whatever's already typed into "(custom)" - same
-# survives-a-refresh spirit the old table_short_labels.xlsx short_label
-# column used). read_custom_name_lookup() lives in app_utils.R so
-# data-raw/07_build_series_reference.R can reuse it to build a reference
-# report that reflects these same overrides.
-series_label_lookup <- read_custom_name_lookup("data/series_names.xlsx", "table_id", "Series (custom)")
-breakdown_label_lookup <- read_custom_name_lookup("data/breakdown_names.xlsx", "Breakdown item (auto)", "Breakdown item (custom)")
-
-# ---- theme dimension map --------------------------------------------------
-# One row per table_id, classifying every level's geographic rank/category
-# up front - what Geographic Aggregation, Geographic unit, Break down by,
-# and the (usually hidden) Series selector are all driven from, instead of
-# the old per-session "Select Data table" pick. Built once at startup like
-# `catalog` itself - see build_theme_dimension_map() in R/app_utils.R.
-# Known data-quality corrections (mislabeled levels, superseded duplicate
-# tables) are applied upstream at database-creation time, not here - see
-# data-raw/05_build_duckdb.R.
-theme_dim_map <- build_theme_dimension_map(catalog, series_label_lookup = series_label_lookup,
-                                            breakdown_label_lookup = breakdown_label_lookup)
+#' Translate the Geographic Aggregation radio's "national" sentinel to
+#' series_facts' own "National" geo_level value; every other value (PT,
+#' CMA, CD, CSD) already matches directly.
+geo_level_query_value <- function(x) if (identical(x, "national")) "National" else x
 
 # ---- source citation ------------------------------------------------------
 # data/source_manifest.csv is a copy of the data-prep pipeline's
@@ -92,27 +88,28 @@ theme_dim_map <- build_theme_dimension_map(catalog, series_label_lookup = series
 # app's own data/ directory so the deployable app bundle (this app/
 # directory) is self-contained and doesn't reach outside itself into the
 # data-prep tree. Records each source table's CKAN resource (agency,
-# format, direct file URL, dataset landing page) - joined back to the
-# currently-displayed table via its table_id's hash prefix
-# (extract_table_hash()) to build a citation for the bottom of the plot card.
+# format, direct file URL, dataset landing page) - joined back to whichever
+# raw table_id(s) actually contributed to the currently-displayed cells
+# (see series_source_table_ids() in R/app_utils.R) via the hash prefix in
+# each one (extract_table_hash()) to build a citation for the bottom of the
+# plot card.
 manifest <- readr::read_csv("data/source_manifest.csv", show_col_types = FALSE,
                              col_types = readr::cols(last_modified_ckan = "c"))
 source_lookup <- build_source_lookup(manifest)
 
-#' Build the citation UI for one displayed table. `table_id` is the table
-#' on screen; `sibling_ids` is every table_id in the same theme, used to
-#' cite the original source table(s) when `table_id` is a synthetic/derived
-#' table (extract_table_hash() returns NA for those - e.g. the merged
-#' refugees table, built from two source tables that are also its
-#' siblings in the "refugees" theme).
-table_citation_ui <- function(table_id, sibling_ids) {
-  hash <- extract_table_hash(table_id)
-  hashes <- if (!is.na(hash)) {
-    hash
-  } else {
-    sibling_hashes <- vapply(sibling_ids, extract_table_hash, character(1))
-    unique(sibling_hashes[!is.na(sibling_hashes)])
+#' Build the citation UI for the table_id(s) actually contributing to the
+#' current view - usually one, but a merged "Total" view can span several
+#' sibling source tables (see data-raw/08_build_series_facts.R). Any
+#' synthetic/derived id (extract_table_hash() returns NA - e.g. the merged
+#' refugees table) falls back to citing every other real table_id in
+#' `theme_table_ids` instead (its own siblings, from the same theme).
+table_citation_ui <- function(table_ids, theme_table_ids) {
+  hashes <- vapply(table_ids, extract_table_hash, character(1))
+  if (all(is.na(hashes))) {
+    hashes <- vapply(theme_table_ids, extract_table_hash, character(1))
   }
+  hashes <- unique(hashes[!is.na(hashes)])
+  if (length(hashes) == 0) return(NULL)
 
   rows <- source_lookup |> filter(hash %in% hashes)
   if (nrow(rows) == 0) return(NULL)
@@ -200,25 +197,31 @@ ui <- page_sidebar(
         });
       }
       // Which Geographic Aggregation ranks are available for the current
-      // theme - the server recomputes this per theme switch (see
-      // build_theme_dimension_map() in R/app_utils.R and the input$theme
+      // series - the server recomputes this per series switch (see
+      // build_series_summary() in R/app_utils.R and the input$series
       // observer in app.R).
       Shiny.addCustomMessageHandler('setGeoAvailability', function(available) {
         setRadioAvailability('geo_level', available);
       });
       // Percentage of Total is meaningless (always exactly 100%) whenever
-      // Break down by is actually in effect and set to 'None' - the server
-      // recomputes this whenever the resolved fill category changes (see
-      // category_level_r() in app.R) and also resets the selection back to
-      // Absolute Values if it was on Percentage when this fires.
+      // the resolved view is a single unbroken-down bar - the server
+      // recomputes this whenever the resolved scope changes and also
+      // resets the selection back to Absolute Values if it was on
+      // Percentage when this fires.
       Shiny.addCustomMessageHandler('setPercentAllowed', function(allowed) {
         setRadioAvailability('display_as', allowed ? ['absolute', 'percent'] : ['absolute']);
       });
-      // Drives the conditionalPanel wrapping the Series selector - it's a
-      // genuine Shiny input (not just a UI toggle) so `conditionalPanel`'s
-      // JS-evaluated condition can reference it directly.
-      Shiny.addCustomMessageHandler('setSeriesNeeded', function(needed) {
-        Shiny.setInputValue('series_needed', needed);
+      // Drive the conditionalPanels wrapping the cascading 'drill into...'
+      // selectors - genuine Shiny inputs (not just UI toggles) so
+      // `conditionalPanel`'s JS-evaluated condition can reference them
+      // directly. Only rendered when the current facet's own nesting
+      // actually goes that deep (see build_series_summary()'s
+      // has_breakdown_2/3).
+      Shiny.addCustomMessageHandler('setDrill1Needed', function(needed) {
+        Shiny.setInputValue('drill_1_needed', needed);
+      });
+      Shiny.addCustomMessageHandler('setDrill2Needed', function(needed) {
+        Shiny.setInputValue('drill_2_needed', needed);
       });
     "))
   ),
@@ -226,17 +229,27 @@ ui <- page_sidebar(
     width = 340,
     h6("Select Theme"),
     selectInput("theme", NULL, choices = THEME_CHOICES),
-    # Only rendered when the current Geo/Category selection still leaves
-    # more than one table_id to choose from (a genuine data ambiguity that
-    # can't be expressed via geography/category/time alone - see
-    # match_candidates() in R/app_utils.R) - `series_needed` is a plain
-    # boolean pushed from the server (see the `setSeriesNeeded` handler
-    # above), true only in that case. In the common case (one candidate)
-    # this never renders.
+    h6("Series"),
+    selectInput("series", NULL, choices = NULL),
     conditionalPanel(
-      "input.series_needed",
-      h6("Series"),
-      selectInput("series", NULL, choices = NULL)
+      "input.geo_level != 'national'",
+      h6("Geographic unit"),
+      selectizeInput("geo_unit", NULL, choices = c("All" = "All"), options = list(server = TRUE))
+    ),
+    conditionalPanel(
+      "input.geo_level == 'national' || input.geo_unit != 'All'",
+      h6("Break down by"),
+      selectInput("cat_level", NULL, choices = c("None" = "none")),
+      conditionalPanel(
+        "input.drill_1_needed",
+        h6("Drill into"),
+        selectInput("drill_1", NULL, choices = c("None" = "none"))
+      ),
+      conditionalPanel(
+        "input.drill_1_needed && input.drill_2_needed",
+        h6("Drill further"),
+        selectInput("drill_2", NULL, choices = c("None" = "none"))
+      )
     ),
     h6("Temporal aggregation"),
     radioButtons("granularity", NULL, choices = "Annual"),
@@ -248,16 +261,6 @@ ui <- page_sidebar(
       "CD" = "CD",
       "CSD" = "CSD"
     ), selected = "national"),
-    conditionalPanel(
-      "input.geo_level != 'national'",
-      h6("Geographic unit"),
-      selectizeInput("geo_unit", NULL, choices = c("All" = "All"), options = list(server = TRUE))
-    ),
-    conditionalPanel(
-      "input.geo_level == 'national' || input.geo_unit != 'All'",
-      h6("Break down by"),
-      selectInput("cat_level", NULL, choices = c("None" = "none"))
-    ),
     h6("Display as"),
     radioButtons("display_as", NULL,
                  choices = c("Absolute Values" = "absolute", "Percentage of Total" = "percent")),
@@ -265,9 +268,12 @@ ui <- page_sidebar(
     sliderInput("years", NULL, min = 2000, max = 2026, value = c(2015, 2026), sep = ""),
     h6("Max categories shown (rest grouped as ‘Other’)"),
     numericInput("top_n", NULL,
-                 value = 5, min = 2, max = 13),
+                 value = 10, min = 2, max = 15),
     helpText("Note: IRCC/IRB suppress (“--”) any value between 0 and 5 to protect privacy; ",
-             "suppressed values are excluded from sums, so totals may be slightly understated.")
+             "suppressed values are excluded from sums, so totals may be understated. ",
+             "The Suppressed Residual item in the plot indicates the difference between the ",
+             "calculated sum of category values displayed and the total value contained in ",
+             "the source data.")
   ),
   navset_hidden(
     id = "main_view",
@@ -304,188 +310,219 @@ server <- function(input, output, session) {
     session$sendCustomMessage("setActiveNav", input$main_view)
   })
 
-  # This theme's rows from the precomputed dimension map - every other
-  # reactive below filters/unions over this instead of talking to `catalog`
-  # or the database directly.
-  theme_rows <- reactive({
+  # This theme's rows from the precomputed series summary - every other
+  # reactive below filters over this instead of re-querying series_facts.
+  theme_series <- reactive({
     req(input$theme)
-    theme_dim_map[theme_dim_map$dataset == input$theme, , drop = FALSE]
+    series_summary[series_summary$theme == input$theme, , drop = FALSE]
   })
 
-  # Resets the theme-scoped selectors to their defaults. Deliberately does
-  # NOT rely on the input$geo_level observer below to do this via a
-  # "national" reset - updateRadioButtons() is a no-op (no invalidation) if
-  # geo_level is already "national" from the previous theme, which would
-  # otherwise skip the Break down by choices getting rebuilt for the new
-  # theme.
+  # On theme change: populate the Series list (always shown - with
+  # duplication resolved at the pipeline level, there's no longer any
+  # per-query ambiguity left for a hidden selector to resolve; Series is
+  # now a plain top-level choice, like Theme) and select the first one.
   observeEvent(input$theme, {
-    rows <- theme_rows()
-    available_ranks <- unique(unlist(rows$geo_ranks))
+    opts <- sort(unique(theme_series()$series))
+    display <- ifelse(nzchar(opts), opts, "(unnamed series)")
+    updateSelectInput(session, "series", choices = stats::setNames(opts, display), selected = opts[1])
+  })
+
+  # This series' rows - drives Geographic Aggregation/Break down by choices.
+  series_rows <- reactive({
+    req(input$series)
+    theme_series()[theme_series()$series == input$series, , drop = FALSE]
+  })
+
+  # Resets the series-scoped selectors to their defaults on every series
+  # switch (including the theme-driven automatic first selection) -
+  # updateRadioButtons() is a no-op (no invalidation) if geo_level is
+  # already "national", which would otherwise skip Break down by's
+  # choices getting rebuilt for the new series.
+  observeEvent(input$series, {
+    rows <- series_rows()
+    available_ranks <- setdiff(unique(rows$geo_level), "National")
     session$sendCustomMessage("setGeoAvailability", c("national", available_ranks))
     updateRadioButtons(session, "geo_level", selected = "national")
 
-    cats <- sort(unique(unlist(rows$categories)))
-    cat_choices <- c("none", cats)
-    names(cat_choices) <- c("None", cats)
-    updateSelectInput(session, "cat_level", choices = cat_choices,
-                       selected = if (length(cats) >= 1) cats[1] else "none")
+    # geo_level defaults to National on every series switch, so Break down
+    # by must be narrowed to facets with actual National-level rows here
+    # too (see the geo_level observer below for why this can't just be
+    # every facet the series has anywhere).
+    national_facets <- rows$facet[rows$geo_level == "National"]
+    facets <- sort(setdiff(unique(national_facets), "Total"))
+    cat_choices <- c("none", facets)
+    names(cat_choices) <- c("None", facets)
+    # "None" resolves to facet = "Total" (see current_scope() below) - some
+    # series (e.g. a Top-25-only ranking table, which never publishes a
+    # grand-total row at all - see data-raw/08_build_series_facts.R) have no
+    # "Total" facet whatsoever, so defaulting to "None" would open the
+    # series on a guaranteed-blank chart. Default to the first real facet
+    # instead whenever no Total exists; only fall back to "None" itself when
+    # there's genuinely nothing else to show.
+    has_total <- "Total" %in% national_facets
+    default_facet <- if (has_total || length(facets) == 0) "none" else facets[1]
+    updateSelectInput(session, "cat_level", choices = cat_choices, selected = default_facet)
   })
 
   # Reacts to the Geographic Aggregation *rank* changing (clicks, or the
-  # server-driven reset to "national" on a theme switch above) -
-  # repopulates the Geographic unit picker for that rank (via a
-  # representative table sharing it - real places don't vary by which
-  # sibling table is used to look them up), and re-scopes Break down by's
-  # choices to categories that actually co-occur with this rank (matters
-  # once a specific Geographic unit turns Break down by into the fill -
-  # see the routing rule in plot_data() below; harmless while it's still
-  # hidden).
+  # server-driven reset to "national" on a series switch above) -
+  # repopulates the Geographic unit picker for that rank (from the
+  # series' own "Total" rows - real places don't depend on which specific
+  # breakdown facet is chosen), and re-scopes Break down by's choices to
+  # facets that actually reach this rank (matters once a specific
+  # Geographic unit turns Break down by into the fill - see the routing
+  # rule in current_scope() below; harmless while it's still hidden).
   observeEvent(input$geo_level, {
-    rows <- theme_rows()
+    rows <- series_rows()
+    gl <- geo_level_query_value(input$geo_level)
+
+    # Facets are narrowed to this rank specifically - a facet's rows can
+    # exist at only some geo levels of a series (e.g. a table nested
+    # under Province/Territory contributes its facet's rows only at
+    # geo_level "PT", never "National"), same rule at every rank
+    # including National, so Break down by never offers a facet with no
+    # data at the currently-selected Geographic Aggregation.
+    rank_rows <- rows[rows$geo_level == gl, , drop = FALSE]
+    facets <- sort(setdiff(unique(rank_rows$facet), "Total"))
+    has_total <- "Total" %in% rank_rows$facet
 
     if (identical(input$geo_level, "national")) {
       updateSelectizeInput(session, "geo_unit", choices = c("All" = "All"), selected = "All", server = TRUE)
-      cats <- sort(unique(unlist(rows$categories)))
     } else {
-      rank_rows <- rows[vapply(rows$geo_ranks, function(s) input$geo_level %in% s, logical(1)), , drop = FALSE]
-      cats <- sort(unique(unlist(rank_rows$categories)))
-      idx <- if (nrow(rank_rows) >= 1) {
-        cl <- rank_rows$classification[[1]]
-        cl$level_index[match(input$geo_level, cl$geo_rank)]
-      } else {
-        NA_integer_
-      }
-      if (nrow(rank_rows) == 0 || is.na(idx)) {
+      total_row <- rank_rows[rank_rows$facet == "Total", , drop = FALSE]
+      if (nrow(total_row) == 0) {
         updateSelectizeInput(session, "geo_unit", choices = c("All" = "All"), selected = "All", server = TRUE)
       } else {
-        rep_row <- rank_rows[1, ]
-        units <- list_geo_units(con, rep_row$table_id, rep_row$n_levels, input$geo_level, idx)
+        units <- list_series_geo_units(con, input$theme, input$series, "Total", gl, total_row$geo_depth[1])
         updateSelectizeInput(session, "geo_unit", choices = units, selected = "All", server = TRUE)
       }
     }
 
-    cat_choices <- c("none", cats)
-    names(cat_choices) <- c("None", cats)
-    selected <- if (!is.null(input$cat_level) && input$cat_level %in% cats) {
+    cat_choices <- c("none", facets)
+    names(cat_choices) <- c("None", facets)
+    # Same "don't default to a guaranteed-blank Total" rule as the series
+    # switch handler above - a rank change can newly land on a geo_level
+    # this series has no Total facet at either (e.g. switching Geographic
+    # Aggregation to a rank a Top-25-only ranking table only publishes real
+    # breakdown rows for, never a grand total).
+    selected <- if (!is.null(input$cat_level) && input$cat_level %in% facets) {
       input$cat_level
-    } else if (length(cats) >= 1) {
-      cats[1]
-    } else {
+    } else if (has_total || length(facets) == 0) {
       "none"
+    } else {
+      facets[1]
     }
     updateSelectInput(session, "cat_level", choices = cat_choices, selected = selected)
   }, ignoreInit = TRUE)
 
+  # Keeps the cascading "Drill into"/"Drill further" selectors in sync -
+  # only shown when the chosen facet's own nesting goes that deep (see
+  # build_series_summary()'s has_breakdown_2/3). Plain observe() (not
+  # observeEvent(), and no ignoreInit) so this always evaluates at least
+  # once at startup and whenever series/geo_level/cat_level change -
+  # otherwise the client's drill_1_needed/drill_2_needed inputs would stay
+  # permanently unset (Shiny's conditionalPanel treats an unset JS
+  # variable as neither reliably true nor false) whenever an
+  # updateSelectInput() call happens to leave cat_level's value unchanged
+  # (e.g. it was already "none" going into a series switch).
+  observe({
+    rows <- series_rows()
+    gl <- geo_level_query_value(input$geo_level)
+    facet <- input$cat_level %||% "none"
+    needs_drill1 <- FALSE
+    if (!identical(facet, "none")) {
+      match_row <- rows[rows$facet == facet & rows$geo_level == gl, , drop = FALSE]
+      needs_drill1 <- nrow(match_row) >= 1 && isTRUE(match_row$has_breakdown_2[1])
+    }
+    session$sendCustomMessage("setDrill1Needed", needs_drill1)
+    if (needs_drill1) {
+      vals <- list_series_breakdown_values(con, input$theme, input$series, facet, gl)
+      updateSelectInput(session, "drill_1", choices = c("None" = "none", stats::setNames(vals, vals)),
+                          selected = "none")
+    }
+  })
+
+  observe({
+    rows <- series_rows()
+    gl <- geo_level_query_value(input$geo_level)
+    facet <- input$cat_level %||% "none"
+    drill1 <- if (!is.null(input$drill_1) && !identical(input$drill_1, "none")) input$drill_1 else NULL
+    needs_drill2 <- FALSE
+    vals <- character(0)
+    if (!is.null(drill1)) {
+      match_row <- rows[rows$facet == facet & rows$geo_level == gl, , drop = FALSE]
+      if (nrow(match_row) >= 1 && isTRUE(match_row$has_breakdown_3[1])) {
+        vals <- list_series_breakdown_values(con, input$theme, input$series, facet, gl, drill1)
+        needs_drill2 <- length(vals) > 0
+      }
+    }
+    session$sendCustomMessage("setDrill2Needed", needs_drill2)
+    if (needs_drill2) {
+      updateSelectInput(session, "drill_2", choices = c("None" = "none", stats::setNames(vals, vals)),
+                          selected = "none")
+    }
+  })
+
   # Defensive fallback for the one narrow case constraint propagation
   # doesn't fully resolve on its own: a specific Geographic unit filter is
-  # active (mode B - see match_candidates()) and the user picks a Break
-  # down by category that doesn't co-occur with the current geo rank in
-  # any table. Rather than leaving a dead-end selection, drop the place
-  # filter back to "All" so the category choice stays honored.
+  # active and the user picks a Break down by facet that doesn't reach
+  # this rank. Rather than leaving a dead-end selection, drop the place
+  # filter back to "All" so the facet choice stays honored (facets are
+  # already narrowed to this rank in the geo_level observer above, so
+  # this should rarely fire - kept as a safety net, same spirit as before).
   observeEvent(input$cat_level, {
     if (!identical(input$geo_unit %||% "All", "All")) {
-      cands <- match_candidates(theme_rows(), input$geo_level, input$geo_unit, input$cat_level)
-      if (nrow(cands) == 0) {
+      rows <- series_rows()
+      gl <- geo_level_query_value(input$geo_level)
+      facet_query <- if (identical(input$cat_level %||% "none", "none")) "Total" else input$cat_level
+      if (nrow(rows[rows$facet == facet_query & rows$geo_level == gl, , drop = FALSE]) == 0) {
         updateSelectizeInput(session, "geo_unit", selected = "All", server = TRUE)
       }
     }
   }, ignoreInit = TRUE)
 
-  # The set of tables consistent with the current Geo/Category selection,
-  # ignoring Series - 1 row in the overwhelming majority of cases; more
-  # than 1 means a genuine data ambiguity Series exists to resolve (see
-  # match_candidates() in R/app_utils.R).
-  series_candidates <- reactive({
-    req(input$geo_level)
-    match_candidates(theme_rows(), input$geo_level, input$geo_unit %||% "All", input$cat_level %||% "none")
-  })
-
-  # Keeps the (usually hidden) Series selector's choices in sync - value is
-  # always the exact table_id (unambiguous even when two candidates'
-  # series_label happen to collide), display text is series_label, falling
-  # back to a year-range parenthetical if that's blank/duplicated.
-  observe({
-    cands <- series_candidates()
-    ids <- unique(cands$table_id)
-    needed <- length(ids) > 1
-    session$sendCustomMessage("setSeriesNeeded", needed)
-    if (!needed) return()
-
-    rows <- cands[match(ids, cands$table_id), , drop = FALSE]
-    display <- ifelse(nzchar(rows$series_label), rows$series_label,
-                       sprintf("Series (%d-%d)", rows$min_year, rows$max_year))
-    choices <- stats::setNames(rows$table_id, display)
-    selected <- if (!is.null(input$series) && input$series %in% rows$table_id) input$series else rows$table_id[1]
-    updateSelectInput(session, "series", choices = choices, selected = selected)
-  })
-
-  # The single table every other reactive below reads from - replaces the
-  # old current_meta()/input$table. Falls back to the first candidate when
-  # Series isn't shown (0 or 1 candidates) or holds a stale value.
-  resolved_table <- reactive({
-    cands <- series_candidates()
-    if (!is.null(input$series) && input$series %in% cands$table_id) {
-      cands <- cands[cands$table_id == input$series, , drop = FALSE]
-    }
-    req(nrow(cands) >= 1)
-    cands[1, , drop = FALSE]
-  })
-
-  # This table's precomputed classify_level() output (see
-  # build_theme_dimension_map()) - was recomputed per-table on every
-  # reactive tick before; now just a lookup.
-  level_classification <- reactive({
-    resolved_table()$classification[[1]]
-  })
-
-  has_subtotals_current <- reactive({
-    table_has_subtotals(con, resolved_table()$table_id)
-  })
-
-  observeEvent(resolved_table(), {
-    m <- resolved_table()
-    granularity_choices <- if (isTRUE(m$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
-    updateRadioButtons(session, "granularity", choices = granularity_choices,
-                        selected = utils::tail(granularity_choices, 1))
-    updateSliderInput(session, "years", min = m$min_year, max = m$max_year,
-                       value = c(m$min_year, m$max_year))
-  })
-
   # Routing rule: geography is the chart's fill dimension only when a real
   # rank is picked AND no specific unit narrows it - otherwise Break down
   # by (or "none"/Total) is the fill, and a specific unit (if any) becomes
-  # a row filter instead (see plot_data() below). Exactly one axis is ever
-  # the fill; never both, never faceted. Pulled out of plot_data() into its
-  # own reactive so the Percentage-of-Total gating observer below can react
-  # to the same resolved fill category without duplicating this logic.
-  #
-  # `input$cat_level`'s value is now a theme-wide *normalized category
-  # name* (e.g. "Immigration Category" - see build_theme_dimension_map()),
-  # not a level index - has to be looked up against the *resolved* table's
-  # own classification to find which level_N it actually is there.
-  category_level_r <- reactive({
-    cl <- level_classification()
-    geo_unit <- input$geo_unit %||% "All"
-    cat_level <- input$cat_level %||% "none"
+  # a row filter instead (see build_series_plot_data() below). Exactly one
+  # axis is ever the fill; never both, never faceted. Resolves to the one
+  # (series, facet, geo_level) row in series_summary this view reads from.
+  current_scope <- reactive({
+    req(input$series, input$geo_level)
+    rows <- series_rows()
     geo_real <- !identical(input$geo_level, "national")
-    geo_all_units <- identical(geo_unit, "All")
-    if (geo_real && geo_all_units) {
-      as.character(cl$level_index[match(input$geo_level, cl$geo_rank)])
-    } else if (identical(cat_level, "none")) {
-      "none"
+    geo_all_units <- identical(input$geo_unit %||% "All", "All")
+    gl <- geo_level_query_value(input$geo_level)
+    facet_query <- if (geo_real && geo_all_units) {
+      "Total"
+    } else if (identical(input$cat_level %||% "none", "none")) {
+      "Total"
     } else {
-      idx <- cl$level_index[match(cat_level, cl$label_normalized)]
-      if (is.na(idx)) "none" else as.character(idx)
+      input$cat_level
     }
+    match_row <- rows[rows$facet == facet_query & rows$geo_level == gl, , drop = FALSE]
+    req(nrow(match_row) >= 1)
+    match_row[1, , drop = FALSE]
+  })
+
+  observeEvent(current_scope(), {
+    scope <- current_scope()
+    granularity_choices <- if (isTRUE(scope$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
+    updateRadioButtons(session, "granularity", choices = granularity_choices,
+                        selected = utils::tail(granularity_choices, 1))
+    updateSliderInput(session, "years", min = scope$min_year, max = scope$max_year,
+                       value = c(scope$min_year, scope$max_year))
   })
 
   # Percentage of Total is meaningless (every bar would be exactly 100%)
-  # whenever the resolved fill category is "None"/Total - only geography
-  # (when it's the fill) or a real Break-down-by selection ever have more
-  # than one segment to take a percentage of.
+  # whenever the resolved view is a single unbroken-down "Total" bar -
+  # only geography (when it's the fill) or a real Break-down-by selection
+  # ever have more than one segment to take a percentage of.
   observe({
-    category_level <- category_level_r()
-    allow_percent <- !(identical(category_level, "none") || identical(category_level, "total"))
+    scope <- current_scope()
+    single_bar <- identical(scope$facet, "Total") &&
+      (identical(scope$geo_level, "National") || !identical(input$geo_unit %||% "All", "All"))
+    allow_percent <- !single_bar
     session$sendCustomMessage("setPercentAllowed", allow_percent)
     if (!allow_percent && identical(input$display_as, "percent")) {
       updateRadioButtons(session, "display_as", selected = "absolute")
@@ -493,55 +530,57 @@ server <- function(input, output, session) {
   })
 
   plot_data <- reactive({
-    m <- resolved_table()
-    req(input$granularity, input$years, input$top_n, input$geo_level)
-    # guard against a stale granularity selection lingering mid-update
-    valid_granularity <- if (isTRUE(m$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
+    scope <- current_scope()
+    req(input$granularity, input$years, input$top_n)
+    valid_granularity <- if (isTRUE(scope$has_month)) c("Monthly", "Quarterly", "Annual") else "Annual"
     req(input$granularity %in% valid_granularity)
 
     geo_unit <- input$geo_unit %||% "All"
     geo_real <- !identical(input$geo_level, "national")
     geo_all_units <- identical(geo_unit, "All")
-
-    category_level <- category_level_r()
-    category_level_label <- if (identical(category_level, "none") || identical(category_level, "total")) {
-      NULL
-    } else {
-      m[[paste0("level_", category_level, "_label")]]
-    }
-
     filter_prefix <- if (geo_real && !geo_all_units) parse_geo_unit(geo_unit) else character(0)
-    filter_level <- length(filter_prefix)
 
-    build_plot_data(
-      con, table_id = m$table_id, n_levels = m$n_levels, level = category_level,
-      granularity = input$granularity, year_range = input$years,
-      is_stock = m$is_stock, top_n = input$top_n, has_month = m$has_month,
-      level_label = category_level_label,
-      filter_level = if (filter_level > 0) filter_level else NULL,
-      filter_values = if (filter_level > 0) filter_prefix else NULL,
-      has_subtotals = has_subtotals_current(),
-      display_as = input$display_as %||% "absolute"
+    drill1 <- if (!is.null(input$drill_1) && !identical(input$drill_1, "none")) input$drill_1 else NULL
+    drill2 <- if (!is.null(input$drill_2) && !identical(input$drill_2, "none")) input$drill_2 else NULL
+
+    build_series_plot_data(
+      con, theme = input$theme, series = input$series,
+      facet = scope$facet, geo_level = scope$geo_level, geo_depth = scope$geo_depth,
+      granularity = input$granularity, year_range = input$years, is_stock = scope$is_stock,
+      top_n = input$top_n, display_as = input$display_as %||% "absolute",
+      geo_unit_prefix = filter_prefix, drill_1 = drill1, drill_2 = drill2
     )
   })
 
   output$plot_title <- renderText({
-    m <- resolved_table()
-    title <- m$table_title
+    scope <- current_scope()
+    # Theme -> Series -> Breakdown -> Drill into -> Drill further, each
+    # segment only present when it's actually adding information beyond the
+    # one before it (a "Total" facet contributes nothing to say, and the
+    # drill segments only exist once the user has actually drilled).
+    parts <- c(unname(DATASET_LABELS[input$theme]), input$series)
+    if (!identical(scope$facet, "Total")) parts <- c(parts, scope$facet)
+    drill1 <- if (!is.null(input$drill_1) && !identical(input$drill_1, "none")) input$drill_1 else NULL
+    drill2 <- if (!is.null(input$drill_2) && !identical(input$drill_2, "none")) input$drill_2 else NULL
+    if (!is.null(drill1)) parts <- c(parts, drill1)
+    if (!is.null(drill2)) parts <- c(parts, drill2)
+    title <- paste(parts, collapse = " → ")
     geo_unit <- input$geo_unit %||% "All"
     if (!identical(input$geo_level, "national") && !identical(geo_unit, "All")) {
       place <- utils::tail(parse_geo_unit(geo_unit), 1)
       title <- paste0(title, " — ", place)
     }
-    if (isTRUE(m$is_stock)) {
+    if (isTRUE(scope$is_stock)) {
       title <- paste(title, "— point-in-time snapshot, not summed across months")
     }
     title
   })
 
   output$source_citation <- renderUI({
-    m <- resolved_table()
-    table_citation_ui(m$table_id, theme_rows()$table_id)
+    scope <- current_scope()
+    ids <- series_source_table_ids(con, input$theme, input$series, scope$facet, scope$geo_level)
+    theme_ids <- series_source_table_ids(con, input$theme, input$series)
+    table_citation_ui(ids, theme_ids)
   })
 
   output$plot <- renderPlotly({

@@ -33,12 +33,6 @@ PROVINCE_ABBR <- c(
   "Yukon" = "YT", "Northwest Territories" = "NT", "Nunavut" = "NU"
 )
 
-#' Table labels for which the leaf category should get a ", <province
-#' abbreviation>" suffix - Census Division/Subdivision names aren't unique
-#' across provinces, and in these tables level_1 is always the
-#' Province/Territory (checked against the catalog when this was written).
-CENSUS_GEO_LABELS <- c("Census Division", "Census Subdivision")
-
 #' Fixed colour for the "Suppressed Residual" pseudo-category (see
 #' build_plot_data()) - black, so it reads as categorically different from
 #' every real/"Other"/"NA" category rather than just another palette hue;
@@ -55,11 +49,24 @@ SUPPRESSED_COLOR <- "#000000"
 #' substring of "Census Subdivision" (no space before "Division" in
 #' "Subdivision"), so CD and CSD don't need special-casing against each
 #' other.
+#'
+#' The PT pattern also matches bare "Province" with no "Territory"/"P/T"
+#' nearby - found via a user report: `rpd_1997_2021`'s level_1 is titled
+#' "Province of Residence at the Time of the Refugee Claim Decision" (real
+#' data: Ontario, Alberta, Yukon, ... - a genuine PT column), but never says
+#' "Territory" or "P/T" anywhere, so the stricter pattern missed it entirely
+#' and it fell through to being classified as an ordinary Break down by
+#' facet instead of real geography - drilling into "Alberta" as if it were a
+#' breakdown *value* rather than picking Alberta via the Geographic unit
+#' selector like every other province-level series. Confirmed safe to
+#' broaden: across every level label in this catalog, this is the only one
+#' that contains "province" without also containing "territory" or "P/T",
+#' so no other label's classification changes.
 GEO_RANK_PATTERNS <- c(
   "Census Subdivision" = "CSD",
   "Census Division" = "CD",
   "Census Metropolitan Area|\\bCMA\\b" = "CMA",
-  "Province\\s*/?\\s*Territory|\\bP/T\\b" = "PT"
+  "Province\\s*/?\\s*Territory|\\bP/T\\b|\\bProvince\\b" = "PT"
 )
 
 #' Vectorized: which geographic rank (if any) a level_N_label describes.
@@ -75,13 +82,39 @@ classify_geo_rank <- function(label) {
   rank
 }
 
-#' Generic, semantically-empty level labels produced when the title-parsing
-#' fallback (guess_level_labels() in R/duckdb_utils.R) or a flat table's own
-#' literal column names (e.g. "program_level_2") run out of real dimension
-#' names to report. Excluded entirely from the "Break down by" selector -
-#' picking one would produce a real data split with no way to explain what
-#' it actually represents.
-FILLER_LEVEL_REGEX <- "^(Category|Program) Level \\d+$"
+#' guess_level_labels()'s (R/duckdb_utils.R) own positional fallback text,
+#' used whenever a table's title doesn't name enough dimensions to cover
+#' every level_N it actually has. Ambiguous by construction: it's what a
+#' truly meaningless padding column looks like (no title text left to
+#' describe it because there's nothing real there), but it's *also* what a
+#' real, deeply-nested dimension looks like when the title names it once but
+#' the data nests it several levels deeper than that (see
+#' reports/database_coverage_report.qmd #2.4, e.g. a "Program" hierarchy 4
+#' levels deep, titled only "... and Program"). Because the label text can't
+#' tell those two cases apart, `table_shape()`'s facet detection
+#' (data-raw/08_build_series_facts.R) checks the real column content before
+#' trusting a position matching only this pattern as filler - see
+#' level_has_real_data() below. Deliberately narrower than FILLER_LEVEL_REGEX
+#' (excludes "... Rank" - see that constant) precisely so that
+#' content-based override never applies to a column that's filler for a
+#' reason *other* than "no title text left", where being non-empty doesn't
+#' make it a real category.
+GENERIC_FALLBACK_LABEL_REGEX <- "^(Category|Program) Level \\d+$"
+
+#' Generic, semantically-empty level labels, excluded entirely from the
+#' "Break down by" selector - picking one would produce a real data split
+#' with no way to explain what it actually represents. Two different kinds:
+#' GENERIC_FALLBACK_LABEL_REGEX (see above - ambiguous, content can override
+#' it) and "... Rank", a purely ordinal position column some source tables
+#' publish alongside a genuine breakdown (IRCC's "Top 25 Countries of
+#' Citizenship" family: level_2 is a literal 1-25 rank number, not a category
+#' in its own right - the real breakdown, Country of Citizenship, is one
+#' level deeper). Unlike the generic-fallback case, a rank column is always
+#' filler regardless of how much real (numeric) data it holds - the numbers
+#' are real, but they're a position, not a category - so it's never subject
+#' to the content-based override table_shape() applies to
+#' GENERIC_FALLBACK_LABEL_REGEX matches.
+FILLER_LEVEL_REGEX <- paste0(GENERIC_FALLBACK_LABEL_REGEX, "|\\bRank$")
 
 #' Classify a table's level_N_label vector (in level order, NAs already
 #' dropped by the caller) for the Geographic Aggregation / Break down by
@@ -103,68 +136,15 @@ classify_level <- function(label) {
 #' appear in a real place name.
 GEO_UNIT_SEP <- "␟"
 
-#' List the distinct places available at one geographic rank for a table,
-#' for the "Geographic unit" selectize in app.R. Always includes "All"
-#' first. CMA/CD/CSD names recur across provinces (e.g. more than one
-#' "Division No. 1"), so for those ranks the option *value* encodes the
-#' full level_1..level_<geo_level_idx> ancestor prefix (joined with
-#' GEO_UNIT_SEP) rather than the bare name alone - both to disambiguate
-#' same-named places in the picker itself and so the value round-trips
-#' straight into an exact-prefix filter (parse_geo_unit(), used by
-#' fetch_leaf_rows()/fetch_published_total()). The *display* label gets
-#' the same ", <province abbreviation>" treatment fetch_leaf_rows() already
-#' applies when showing CD/CSD as the chart's category, for the same
-#' disambiguation reason. Provinces are ordered west-to-east
-#' (PROVINCE_ORDER_WEST_TO_EAST) when geo_rank == "PT"; other ranks sort by
-#' display label.
-list_geo_units <- function(con, table_id, n_levels, geo_rank, geo_level_idx) {
-  level_cols <- paste0("level_", seq_len(geo_level_idx))
-  d <- dplyr::tbl(con, "facts") |>
-    dplyr::filter(.data$table_id == !!table_id, .data$row_level == !!n_levels) |>
-    dplyr::select(dplyr::all_of(level_cols)) |>
-    dplyr::distinct() |>
-    dplyr::collect()
-  d <- d[stats::complete.cases(d), , drop = FALSE]
-  if (nrow(d) == 0) return(c("All" = "All"))
-
-  unit_value <- do.call(paste, c(as.list(d[level_cols]), sep = GEO_UNIT_SEP))
-  place <- d[[geo_level_idx]]
-  display <- if (geo_level_idx == 1) {
-    place
-  } else {
-    abbr <- PROVINCE_ABBR[d[[1]]]
-    ifelse(!is.na(abbr), paste0(place, ", ", abbr), place)
-  }
-
-  ord <- if (identical(geo_rank, "PT")) {
-    order(match(display, PROVINCE_ORDER_WEST_TO_EAST, nomatch = length(PROVINCE_ORDER_WEST_TO_EAST) + 1L))
-  } else {
-    order(display)
-  }
-  c("All" = "All", stats::setNames(unit_value[ord], display[ord]))
-}
-
-#' Split a Geographic unit selectize value back into its level_1..level_k
-#' ancestor prefix values (see list_geo_units()). "All"/NULL/empty means no
-#' unit filter is in effect.
+#' Split a Geographic unit selectize value back into its ancestor-prefix
+#' values (see list_series_geo_units() in the series_facts query layer
+#' below). "All"/NULL/empty means no unit filter is in effect.
 parse_geo_unit <- function(geo_unit) {
   if (is.null(geo_unit) || identical(geo_unit, "All") || !nzchar(geo_unit)) {
     character(0)
   } else {
     strsplit(geo_unit, GEO_UNIT_SEP, fixed = TRUE)[[1]]
   }
-}
-
-#' TRUE if this table has any IRCC/IRB-published subtotal rows at all
-#' (pivot-shaped tables only - flat tables never carry them, see
-#' fetch_published_total()). Checked live per table switch; cheap given
-#' the existing idx_facts_table_id index.
-table_has_subtotals <- function(con, table_id) {
-  hit <- dplyr::tbl(con, "facts") |>
-    dplyr::filter(.data$table_id == !!table_id, .data$is_row_subtotal == TRUE) |>
-    utils::head(1) |>
-    dplyr::collect()
-  nrow(hit) > 0
 }
 
 #' True leaf rows for one table: rows with no deeper *child* row sharing
@@ -210,153 +190,140 @@ true_leaf_rows <- function(con, table_id, n_levels) {
   leaves
 }
 
-#' Pull the finest-grain leaf rows for one table from DuckDB: the deepest
-#' row level (no double-counting from subtotal rows) and the finest
-#' available time grain (month if the table has one, else year). Keeps
-#' `entity_id` - the true leaf identity (every level column concatenated) -
-#' distinct from `category` (the level the user chose to group/display by),
-#' because for stock tables "latest month" has to be resolved per true leaf
-#' entity *before* summing up to the display category (see
-#' aggregate_series()); resolving it directly on the coarser category would
-#' silently drop every entity but one within each category.
-#'
-#' When `level_label` is a Census Division/Subdivision (CENSUS_GEO_LABELS),
-#' the category gets a ", <province abbreviation>" suffix from level_1 -
-#' these names recur across provinces (more than one "Windsor"), so without
-#' this, same-named places in different provinces would silently merge
-#' into one category.
-#'
-#' `filter_level`/`filter_values` (optional) narrow the query to one exact
-#' geographic ancestor prefix - the "Geographic unit" picker in app.R
-#' turning geography into a *filter* rather than the display category (see
-#' the `category_level` routing rule in app.R's `plot_data` reactive). This
-#' is independent of `level`/`category`: a unit filter can be in effect
-#' while a completely different (non-geographic) level is chosen as
-#' `category`.
-fetch_leaf_rows <- function(con, table_id, n_levels, level, year_range, has_month, level_label = NULL,
-                             filter_level = NULL, filter_values = NULL) {
+#' Cap on how many nested breakdown levels `series_facts` keeps per facet
+#' (`breakdown_1`, `breakdown_2`, `breakdown_3`) - matches every nested
+#' example found in this catalog so far (the deepest, the French-Speaking
+#' PR Immigration Category family, nests 3 deep). A table with more real
+#' levels than this past its own geography has the extra depth folded into
+#' `breakdown_3` (summed away), not dropped silently -
+#' data-raw/08_build_series_facts.R logs when that happens.
+MAX_BREAKDOWN_LEVELS <- 3
+
+#' One table's own published subtotal rows at a specific geographic depth -
+#' EVERY entity at that depth, not just one (generalizes
+#' fetch_published_total()'s single-prefix lookup for use in
+#' data-raw/08_build_series_facts.R, which combines sibling tables' totals
+#' across an entire geographic level rather than one specific place).
+#' `geo_level_idx` 0 means the grand total (the row where `level_1` is
+#' `NA`); k >= 1 means the subtotal row at that many leading geo levels
+#' (`level_1..level_k`), returned as `geo_1..geo_k`. Kept at the finest
+#' period grain available (month if `has_month`, else year) - granularity
+#' rollup (and, for stock tables, "latest month in period") happens later,
+#' the same way it already does for any other entity-grouped series (see
+#' aggregate_series()).
+table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month) {
   period_type_filter <- if (isTRUE(has_month)) "month" else "year"
-  level_cols <- paste0("level_", seq_len(n_levels))
-
-  base <- true_leaf_rows(con, table_id, n_levels) |>
-    dplyr::filter(
-      .data$period_type == !!period_type_filter,
-      .data$period_year >= !!year_range[1],
-      .data$period_year <= !!year_range[2]
-    )
-
-  if (!is.null(filter_level) && filter_level > 0) {
-    for (i in seq_len(filter_level)) {
-      col <- paste0("level_", i)
-      val <- filter_values[i]
-      base <- base |> dplyr::filter(.data[[col]] == !!val)
-    }
-  }
-
-  base <- if (identical(level, "total") || identical(level, "none")) {
-    base |> dplyr::mutate(category = "Total")
-  } else {
-    lvl_col <- paste0("level_", level)
-    base |> dplyr::mutate(category = .data[[lvl_col]])
-  }
-
-  d <- base |>
-    dplyr::select(dplyr::all_of(level_cols), "category", "period_year", "period_quarter",
-                   "period_month", "value") |>
-    dplyr::collect()
-
-  if (!identical(level, "total") && !identical(level, "none") &&
-      isTRUE(level_label %in% CENSUS_GEO_LABELS) && "level_1" %in% names(d)) {
-    abbr <- PROVINCE_ABBR[d$level_1]
-    d$category <- ifelse(!is.na(abbr), paste0(d$category, ", ", abbr), d$category)
-  }
-
-  # build the true leaf entity key in plain R - simpler and more portable
-  # than translating a dynamic-width paste() into SQL via dbplyr
-  d$entity_id <- do.call(paste, c(as.list(d[level_cols]), sep = ""))
-  d[c("entity_id", "category", "period_year", "period_quarter", "period_month", "value")]
-}
-
-#' Fetch the "real" (IRCC/IRB-published) total for one table/period/place,
-#' for the Suppressed Residual (see build_plot_data()). Reuses the same
-#' parent-subtotal matching pattern R/validate_utils.R's row-consistency
-#' checks already rely on: a group's own published subtotal sits at
-#' `row_level == <depth of that group's own dimension prefix>`, flagged
-#' `is_row_subtotal == TRUE`, with `level_1..level_<depth>` holding that
-#' group's own values (`level_1` is `NA` for the grand total, which always
-#' sits at `row_level == 1`). `prefix_level`/`prefix_values` (0/empty for
-#' the grand total) work exactly like `fetch_leaf_rows()`'s `filter_level`/
-#' `filter_values`. A stock table's subtotal row is already a single
-#' per-month aggregate (unlike leaf rows, no per-entity dedup is needed),
-#' so the latest available month within the target quarter/year is taken
-#' directly; a flow table's subtotal sums across months in the target
-#' period, same as leaf rows. Returns `NULL` if no matching subtotal rows
-#' exist for the requested filter/year range (callers should check
-#' `table_has_subtotals()` once per table before relying on this).
-fetch_published_total <- function(con, table_id, prefix_level, prefix_values, year_range,
-                                   has_month, is_stock, granularity) {
-  period_type_filter <- if (isTRUE(has_month)) "month" else "year"
+  row_level_needed <- max(geo_level_idx, 1)
+  geo_cols <- if (geo_level_idx >= 1) paste0("level_", seq_len(geo_level_idx)) else character(0)
 
   base <- dplyr::tbl(con, "facts") |>
     dplyr::filter(
       .data$table_id == !!table_id,
       .data$is_row_subtotal == TRUE,
-      .data$row_level == !!max(prefix_level, 1),
-      .data$period_type == !!period_type_filter,
-      .data$period_year >= !!year_range[1],
-      .data$period_year <= !!year_range[2]
+      .data$row_level == !!row_level_needed,
+      .data$period_type == !!period_type_filter
     )
-
-  base <- if (prefix_level == 0) {
+  # row_level == geo_level_idx also matches the grand-total row itself
+  # (level_1 IS NA, always sits at row_level 1) whenever geo_level_idx is
+  # 1 - excluded here, not just for the geo_level_idx == 0 grand-total
+  # case, or it would double up as an extra bogus "place" alongside every
+  # real province/CMA/etc. subtotal
+  base <- if (geo_level_idx == 0) {
     base |> dplyr::filter(is.na(.data$level_1))
   } else {
-    for (i in seq_len(prefix_level)) {
-      col <- paste0("level_", i)
-      val <- prefix_values[i]
-      base <- base |> dplyr::filter(.data[[col]] == !!val)
-    }
-    base
+    base |> dplyr::filter(!is.na(.data$level_1))
   }
 
   d <- base |>
-    dplyr::select("period_year", "period_quarter", "period_month", "value") |>
+    dplyr::select(dplyr::all_of(geo_cols), "period_year", "period_quarter", "period_month", "value") |>
     dplyr::collect()
-  if (nrow(d) == 0) return(NULL)
+  if (geo_level_idx >= 1) names(d)[seq_along(geo_cols)] <- paste0("geo_", seq_along(geo_cols))
+  d
+}
 
-  if (granularity == "Monthly") {
-    out <- d |>
-      dplyr::group_by(.data$period_year, .data$period_month) |>
-      dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop") |>
-      dplyr::mutate(period_display = sprintf("%d-%02d", .data$period_year, .data$period_month))
-  } else if (granularity == "Quarterly" && "period_quarter" %in% names(d) && !all(is.na(d$period_quarter))) {
-    if (isTRUE(is_stock)) {
-      out <- d |>
-        dplyr::group_by(.data$period_year, .data$period_quarter) |>
-        dplyr::slice_max(.data$period_month, n = 1, with_ties = FALSE) |>
-        dplyr::ungroup() |>
-        dplyr::transmute(.data$period_year, .data$period_quarter, published_total = .data$value)
-    } else {
-      out <- d |>
-        dplyr::group_by(.data$period_year, .data$period_quarter) |>
-        dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
-    }
-    out <- out |> dplyr::mutate(period_display = sprintf("%d Q%d", .data$period_year, .data$period_quarter))
-  } else {
-    if (isTRUE(is_stock)) {
-      out <- d |>
-        dplyr::group_by(.data$period_year) |>
-        dplyr::slice_max(.data$period_month, n = 1, with_ties = FALSE) |>
-        dplyr::ungroup() |>
-        dplyr::transmute(.data$period_year, published_total = .data$value)
-    } else {
-      out <- d |>
-        dplyr::group_by(.data$period_year) |>
-        dplyr::summarise(published_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
-    }
-    out <- out |> dplyr::mutate(period_display = as.character(.data$period_year))
+#' Whether a level_N column genuinely carries real category data, as opposed
+#' to being an empty structural placeholder - used to override a generic
+#' ("Category Level N"/"Program Level N") title-derived label's filler
+#' classification (FILLER_LEVEL_REGEX) when the column it labels isn't
+#' actually empty. Found via reports/database_coverage_report.qmd (#2.4):
+#' guess_level_labels() (R/duckdb_utils.R) falls back to that same generic
+#' text whenever a table's title names a dimension once but the source data
+#' nests it deeper than the title says (e.g. a "Program" hierarchy 4 levels
+#' deep, titled only "... and Program") - indistinguishable from true filler
+#' by label text alone, but not by content: true filler columns are always
+#' entirely NA (padding past a table's real depth), while an under-named
+#' real level has real, populated values. `>= 1` distinct non-blank value is
+#' enough - even a single real category is more informative than treating
+#' the level as nonexistent.
+level_has_real_data <- function(con, table_id, level_col) {
+  n <- dplyr::tbl(con, "facts") |>
+    dplyr::filter(.data$table_id == !!table_id, !is.na(.data[[level_col]]), .data[[level_col]] != "") |>
+    dplyr::distinct(.data[[level_col]]) |>
+    dplyr::count() |>
+    dplyr::pull(.data$n)
+  length(n) > 0 && n[1] >= 1
+}
+
+#' One table's own true leaf rows (see true_leaf_rows()), reshaped into
+#' `series_facts`'s two-part column scheme: `geo_1..geo_{length(geo_positions)}`
+#' for whatever geographic levels this table has (possibly none), and
+#' `breakdown_1..breakdown_k` (k capped at MAX_BREAKDOWN_LEVELS) for the
+#' rest - this table's own real (non-geo, non-filler) dimension level(s),
+#' positionally, whether that's a genuine parent/child hierarchy
+#' (Immigration Category -> sub-program) or two independently-published
+#' dimensions the source nonetheless nests as subtotal rows (e.g. Country of
+#' Citizenship with an Immigration Category drill-down) - see
+#' data-raw/08_build_series_facts.R for why both are treated the same way
+#' here. `geo_positions`/`facet_positions` (from table_shape() there) are
+#' explicit level_N *positions*, not just leading counts, because a filler
+#' column (see FILLER_LEVEL_REGEX - e.g. a literal "Country Rank" ordinal)
+#' can sit between a table's geography and its real facet and must be
+#' dropped entirely rather than folded into either. Levels past
+#' MAX_BREAKDOWN_LEVELS are summed away into `breakdown_3` rather than
+#' silently dropped.
+table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_positions, has_month) {
+  period_type_filter <- if (isTRUE(has_month)) "month" else "year"
+  # paste0() recycles a zero-length argument as "" instead of returning
+  # character(0) when the other argument is non-empty (here, the constant
+  # "level_" prefix) - explicit length checks avoid a bogus single "level_"
+  # column name when a table has no geo levels (geo_positions empty) or,
+  # in principle, no facet levels at all.
+  geo_cols <- if (length(geo_positions) > 0) paste0("level_", geo_positions) else character(0)
+  n_breakdown <- length(facet_positions)
+  breakdown_src_cols <- if (n_breakdown > 0) paste0("level_", facet_positions) else character(0)
+
+  d <- true_leaf_rows(con, table_id, n_levels) |>
+    dplyr::filter(.data$period_type == !!period_type_filter) |>
+    dplyr::select(dplyr::all_of(c(geo_cols, breakdown_src_cols)), "period_year", "period_quarter",
+                   "period_month", "value") |>
+    dplyr::collect()
+
+  if (length(geo_cols) >= 1) names(d)[seq_along(geo_cols)] <- paste0("geo_", seq_along(geo_cols))
+
+  n_keep <- min(n_breakdown, MAX_BREAKDOWN_LEVELS)
+  for (i in seq_len(n_keep)) {
+    names(d)[names(d) == breakdown_src_cols[i]] <- paste0("breakdown_", i)
   }
-
-  out |> dplyr::select("period_display", "published_total")
+  if (n_breakdown > MAX_BREAKDOWN_LEVELS) {
+    # fold every level past the cap into the deepest kept column by
+    # dropping the extra source columns and summing over them
+    extra_cols <- breakdown_src_cols[(MAX_BREAKDOWN_LEVELS + 1):n_breakdown]
+    d <- d |>
+      dplyr::select(-dplyr::all_of(extra_cols)) |>
+      dplyr::group_by(dplyr::across(dplyr::any_of(c(paste0("geo_", seq_along(geo_cols)),
+                                                      paste0("breakdown_", seq_len(MAX_BREAKDOWN_LEVELS)),
+                                                      "period_year", "period_quarter", "period_month")))) |>
+      dplyr::summarise(value = sum(.data$value, na.rm = TRUE), .groups = "drop")
+  }
+  for (i in seq_len(MAX_BREAKDOWN_LEVELS)) {
+    col <- paste0("breakdown_", i)
+    if (!col %in% names(d)) d[[col]] <- NA_character_
+  }
+  for (i in seq_len(3)) {
+    col <- paste0("geo_", i)
+    if (!col %in% names(d)) d[[col]] <- NA_character_
+  }
+  d
 }
 
 #' Roll the finest-grain leaf rows up to the requested granularity.
@@ -378,8 +345,12 @@ aggregate_series <- function(raw, granularity, is_stock) {
       dplyr::group_by(.data$category, .data$period_year, .data$period_month) |>
       dplyr::summarise(value = sum(.data$value, na.rm = TRUE), .groups = "drop") |>
       dplyr::mutate(
-        period_display = sprintf("%d-%02d", .data$period_year, .data$period_month),
-        period_sort = .data$period_year * 100 + .data$period_month
+        # same NA-safety as the Quarterly branch below - a year with no
+        # monthly data at all (only an annual figure) still needs to sort
+        # and display sensibly on this axis
+        period_display = dplyr::if_else(is.na(.data$period_month), as.character(.data$period_year),
+                                          sprintf("%d-%02d", .data$period_year, .data$period_month)),
+        period_sort = .data$period_year * 100 + dplyr::coalesce(.data$period_month, 0L)
       )
   } else if (granularity == "Quarterly" && "period_quarter" %in% names(raw) && !all(is.na(raw$period_quarter))) {
     if (isTRUE(is_stock)) {
@@ -396,8 +367,16 @@ aggregate_series <- function(raw, granularity, is_stock) {
     }
     out <- out |>
       dplyr::mutate(
-        period_display = sprintf("%d Q%d", .data$period_year, .data$period_quarter),
-        period_sort = .data$period_year * 10 + .data$period_quarter
+        # a year with no real quarterly breakdown at all (only an annual
+        # figure is published for it) still needs to appear on this same
+        # axis in chronological order - "2000 QNA" reads as if annual and
+        # quarterly data got jumbled together, and an NA period_quarter
+        # would otherwise sort after every real quarter regardless of
+        # year (dplyr::arrange() puts NA last), scrambling the whole
+        # pre-2015 range to the end of the x-axis
+        period_display = dplyr::if_else(is.na(.data$period_quarter), as.character(.data$period_year),
+                                          sprintf("%d Q%d", .data$period_year, .data$period_quarter)),
+        period_sort = .data$period_year * 10 + dplyr::coalesce(.data$period_quarter, 0L)
       )
   } else { # Annual
     if (isTRUE(is_stock)) {
@@ -632,58 +611,67 @@ derive_series_label <- function(table_title, dataset, level_labels) {
   if (nchar(x) < 3) "" else x
 }
 
-#' Read one of the hand-editable "(custom)" name-override columns (see
-#' build_theme_dimension_map()'s series_label_lookup/breakdown_label_lookup
-#' params) out of an Excel Table - data/series_names.xlsx (`key_col =
-#' "table_id"`, `custom_col = "Series (custom)"`) or
-#' data/breakdown_names.xlsx (`key_col = "Breakdown item (auto)"`,
-#' `custom_col = "Breakdown item (custom)"`). Only non-blank values become
-#' overrides; a missing file (e.g. a fresh checkout before the pipeline's
-#' been run once) just means no overrides are active, not an error. Used
-#' by both app.R (to drive the live app) and
-#' data-raw/07_build_series_reference.R (so the reference report reflects
-#' the same overrides the app actually shows).
-read_custom_name_lookup <- function(path, key_col, custom_col) {
+#' Separator joining a Breakdown item override's composite
+#' `(table_id, "Breakdown item (auto)")` key into one named-vector name (see
+#' read_custom_name_lookup()'s `key_col2` and
+#' derive_theme_dimension_map()'s breakdown_label_lookup application) - a
+#' plain label-only key can't tell two tables' uses of the same raw label
+#' apart, which is exactly the "mislabelled in some series but not others"
+#' case this pairing fixes. "::" is safe here (table_ids use "/", labels
+#' don't use "::").
+BREAKDOWN_KEY_SEP <- "::"
+
+#' Read one of the hand-editable "(custom)" name-override columns out of
+#' `app/data/label_overrides.xlsx` (see derive_theme_dimension_map()'s
+#' series_label_lookup/breakdown_label_lookup params) - `key_col = "table_id"`
+#' for Series (custom), or `key_col = "table_id"` + `key_col2 = "Breakdown
+#' item (auto)"` for Breakdown item (custom) (composite-keyed so the same
+#' raw label can be corrected differently per table - see
+#' BREAKDOWN_KEY_SEP). Only non-blank values become overrides; a missing
+#' file (e.g. a fresh checkout before the pipeline's been run once) just
+#' means no overrides are active, not an error. Used only by
+#' data-raw/06_build_label_lookups.R now - overrides are baked into
+#' `catalog` at database-creation time (see that script and
+#' derive_theme_dimension_map()), so app.R and
+#' data-raw/07_build_series_reference.R no longer read this file at all.
+read_custom_name_lookup <- function(path, key_col, custom_col, key_col2 = NULL) {
   if (!file.exists(path)) return(character())
   d <- readxl::read_excel(path, sheet = 1)
   custom <- trimws(as.character(d[[custom_col]]))
   keep <- !is.na(custom) & nzchar(custom)
-  stats::setNames(custom[keep], d[[key_col]][keep])
+  keys <- if (is.null(key_col2)) d[[key_col]] else paste(d[[key_col]], d[[key_col2]], sep = BREAKDOWN_KEY_SEP)
+  stats::setNames(custom[keep], keys[keep])
 }
 
-#' Build the per-table dimension map every Geo/Category/Series selector in
-#' app.R is driven from - one row per table_id in `catalog` (genuinely-
-#' redundant duplicate tables are dropped upstream, at database-creation
-#' time - see data-raw/05_build_duckdb.R's EXCLUDED_DUPLICATE_TABLE_IDS -
-#' so they're simply not present here), with:
-#'  - `geo_ranks`: list-column, the set of geographic ranks (CSD/CD/CMA/PT)
-#'    this table has (via classify_geo_rank())
-#'  - `categories`: list-column, the set of *normalized*
-#'    (normalize_category_label()) non-geographic, non-filler category
-#'    labels this table has, with `breakdown_label_lookup` overrides
-#'    applied (see below)
-#'  - `classification`: list-column, this table's full classify_level()
-#'    output (label/geo_rank/is_filler) with `level_index` attached and
-#'    `label_normalized` already overridden - the same shape app.R's old
-#'    level_classification() reactive used to compute per-table on every
-#'    reactive tick; precomputed once here instead
-#'  - `series_label`: from `series_label_lookup` (keyed by table_id) if
-#'    present and non-empty, else derive_series_label()
+#' Compute a theme dimension map straight from *raw, uncurated* `catalog`
+#' data (table_title/level_N_label exactly as data-raw/05_build_duckdb.R
+#' wrote them) - i.e. before any hand-typed correction is applied. This is
+#' the pipeline-only counterpart to build_theme_dimension_map() below: it
+#' always re-derives `series_label`/`categories` from scratch via
+#' derive_series_label()/normalize_category_label(), applies
+#' `series_label_lookup`/`breakdown_label_lookup` on top, and is used
+#' exactly once, by data-raw/06_build_label_lookups.R, to work out what the
+#' final baked-in values in `catalog` should be. It never reads back
+#' anything `catalog` may already have baked in from a previous 06 run -
+#' see that script's header comment for why 05 must run first for a true
+#' "auto" baseline.
 #'
 #' `series_label_lookup` (keyed by table_id) and `breakdown_label_lookup`
-#' (keyed by the *auto* normalized category name) are the "(custom)"
-#' columns of data/series_names.xlsx and data/breakdown_names.xlsx -
-#' editable Excel Tables app.R loads at startup, in the same
-#' hand-edits-survive-a-refresh spirit the old table_short_labels.xlsx
-#' short_label column used (see data-raw/06_build_label_lookups.R, which
-#' regenerates both files' "auto" columns while preserving any "(custom)"
-#' values already typed in). A `breakdown_label_lookup` override renames a
-#' category everywhere at once - the Break down by choice list, the
-#' Series/candidate-matching signature, and the resolved chart's category
-#' axis all key off the same overridden `label_normalized` value.
-#' Computed once at app startup (like `catalog` itself), not per-session.
-build_theme_dimension_map <- function(catalog, series_label_lookup = character(),
-                                       breakdown_label_lookup = character()) {
+#' (keyed by the composite `(table_id, auto label)` - see
+#' read_custom_name_lookup()'s `key_col2`/BREAKDOWN_KEY_SEP) are the
+#' "(custom)" columns of app/data/label_overrides.xlsx. The composite key
+#' for breakdowns matters: it lets the same raw label be corrected
+#' differently in different tables, instead of one global rename - a label
+#' can read correctly in most tables and be wrong in just one.
+#'
+#' Returns one row per surviving table_id (genuinely-redundant duplicates
+#' are already dropped upstream - see data-raw/05_build_duckdb.R's
+#' EXCLUDED_DUPLICATE_TABLE_IDS) with `geo_ranks`, `categories`,
+#' `classification` (label/geo_rank/is_filler/level_index/label_normalized),
+#' and `series_label` - the same shape build_theme_dimension_map() produces,
+#' since 06 uses this shape to work out what to write into `catalog`.
+derive_theme_dimension_map <- function(catalog, series_label_lookup = character(),
+                                        breakdown_label_lookup = character()) {
   level_label_cols <- c("level_1_label", "level_2_label", "level_3_label", "level_4_label", "level_5_label")
 
   rows <- lapply(seq_len(nrow(catalog)), function(i) {
@@ -694,7 +682,8 @@ build_theme_dimension_map <- function(catalog, series_label_lookup = character()
     cl$level_index <- idx
     cl$label_normalized <- normalize_category_label(cl$label)
     if (length(breakdown_label_lookup) > 0) {
-      overridden <- unname(breakdown_label_lookup[cl$label_normalized])
+      keys <- paste(row$table_id, cl$label_normalized, sep = BREAKDOWN_KEY_SEP)
+      overridden <- unname(breakdown_label_lookup[keys])
       cl$label_normalized <- ifelse(!is.na(overridden) & nzchar(overridden), overridden, cl$label_normalized)
     }
 
@@ -717,113 +706,83 @@ build_theme_dimension_map <- function(catalog, series_label_lookup = character()
     )
   })
 
-  dedupe_series_labels(do.call(rbind, rows))
+  do.call(rbind, rows)
 }
 
-#' Guarantee series_label is unique within each theme (dataset) - not just
-#' within a single Geo/Category combination's candidate set. Two tables
-#' that never actually appear together in today's Series selector (because
-#' they answer different Geo/Category combinations) can still share a
-#' derive_series_label() result - e.g. plain "Permanent Residents" comes
-#' out of a dozen different tables that simply have no distinguishing
-#' population/program qualifier to keep (see derive_series_label()) - and
-#' leaving those as exact duplicates is confusing to anyone scanning the
-#' full list, not just a functional bug in the one narrower case where two
-#' duplicates *do* share a combination (that narrower case was the actual
-#' "data cycles" bug - two candidates in the same dropdown were visually
-#' indistinguishable and picking "the same" option again could silently
-#' select the other one's data - fixed at the source by no longer
-#' stripping the multi-sheet disambiguator suffix in derive_series_label(),
-#' but this pass guarantees the *stronger* "no dupes at all" property
-#' regardless of whether a future table addition would otherwise bring two
-#' currently-non-colliding duplicates into the same dropdown).
+#' Build the per-table dimension map every Geo/Category/Series selector in
+#' app.R is driven from - one row per table_id in `catalog`. Unlike
+#' derive_theme_dimension_map() (the pipeline-only function that works out
+#' what corrections *should* be), this is the plain app-facing reader: by
+#' the time the app sees it, `catalog$level_N_label` and
+#' `catalog$series_label` are already final - hand corrections were baked
+#' in at database-creation time by data-raw/06_build_label_lookups.R - so
+#' this just classifies/groups what's already there. No lookup files, no
+#' derive_series_label() fallback. `categories`/`classification` still run
+#' normalize_category_label()/classify_level() for their generic
+#' decorator-stripping and geo/filler classification (harmless to redo -
+#' idempotent on already-clean text), not to correct anything.
 #'
-#' Disambiguates using each table's own geo_ranks/categories - the same
-#' vocabulary a user already sees in Geographic Aggregation/Break down by,
-#' so the qualifier is informative rather than arbitrary (e.g. "Permanent
-#' Residents (Age Group)" vs "Permanent Residents (Gender)") - and only
-#' falls back to a bare numeric suffix in the rare case that doesn't
-#' resolve every collision (e.g. two duplicates sharing the exact same
-#' geo/category set too).
-dedupe_series_labels <- function(dim_map) {
-  for (ds in unique(dim_map$dataset)) {
-    idx <- which(dim_map$dataset == ds)
-    seen <- character(0)
-    for (i in idx) {
-      lbl <- dim_map$series_label[i]
-      if (!nzchar(lbl) || !(lbl %in% seen)) {
-        seen <- c(seen, lbl)
-        next
-      }
+#'  - `geo_ranks`: list-column, the set of geographic ranks (CSD/CD/CMA/PT)
+#'    this table has (via classify_geo_rank())
+#'  - `categories`: list-column, the set of normalized non-geographic,
+#'    non-filler category labels this table has
+#'  - `classification`: list-column, this table's full classify_level()
+#'    output (label/geo_rank/is_filler) with `level_index` attached - the
+#'    same shape app.R's old level_classification() reactive used to
+#'    compute per-table on every reactive tick; precomputed once here
+#'  - `series_label`: straight from `catalog$series_label`
+#'
+#' Computed once at app startup (like `catalog` itself), not per-session.
+build_theme_dimension_map <- function(catalog) {
+  level_label_cols <- c("level_1_label", "level_2_label", "level_3_label", "level_4_label", "level_5_label")
 
-      qualifiers <- c(unlist(dim_map$categories[i]), unlist(dim_map$geo_ranks[i]))
-      # ignore.case + fixed can't be combined in base R (fixed silently
-      # wins, case-sensitively) - lower-case both sides instead, since
-      # qualifier text (e.g. "Intended Occupation (NOC 2011)") can contain
-      # regex metacharacters that fixed=FALSE would misinterpret
-      qualifiers <- qualifiers[nzchar(qualifiers) &
-                                  !vapply(qualifiers, function(q) grepl(tolower(q), tolower(lbl), fixed = TRUE),
-                                          logical(1))]
-      # try each candidate qualifier in turn (not just the first) before
-      # falling back to a numeric suffix - two different duplicates can
-      # otherwise both reach for the same first-choice qualifier (e.g. two
-      # geo-only tables both listing "PT" first in geo_ranks), needlessly
-      # forcing the second one into an uninformative "(2)" when a
-      # perfectly good second-choice qualifier (e.g. "CD") was available.
-      new_lbl <- lbl
-      for (q in qualifiers) {
-        candidate <- paste0(lbl, " (", q, ")")
-        if (!(candidate %in% seen)) {
-          new_lbl <- candidate
-          break
-        }
-      }
+  rows <- lapply(seq_len(nrow(catalog)), function(i) {
+    row <- catalog[i, , drop = FALSE]
+    labels <- unlist(row[, level_label_cols])
+    idx <- which(!is.na(labels))
+    cl <- classify_level(unname(labels[idx]))
+    cl$level_index <- idx
+    cl$label_normalized <- normalize_category_label(cl$label)
 
-      suffix <- 2
-      while (new_lbl %in% seen) {
-        new_lbl <- paste0(lbl, " (", suffix, ")")
-        suffix <- suffix + 1
-      }
-      dim_map$series_label[i] <- new_lbl
-      seen <- c(seen, new_lbl)
-    }
-  }
-  dim_map
+    cat_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
+
+    data.frame(
+      dataset = row$dataset, table_id = row$table_id, table_title = row$table_title,
+      n_levels = row$n_levels, has_month = row$has_month, is_stock = row$is_stock,
+      min_year = row$min_year, max_year = row$max_year,
+      geo_ranks = I(list(unique(stats::na.omit(cl$geo_rank)))),
+      categories = I(list(unique(cat_rows$label_normalized))),
+      classification = I(list(cl)),
+      series_label = row$series_label,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
 }
 
-#' Filter a theme's dimension-map rows (see build_theme_dimension_map()) to
-#' those consistent with the current Geographic Aggregation/Geographic
-#' unit/Break down by selection, using the same two-mode fill-vs-filter
-#' rule app.R's `category_level_r()` already applies to routing a single
-#' resolved table's levels - extended here to routing *which table* first:
-#'  - geography-is-fill (`geo_level` real, `geo_unit` == "All"): candidates
-#'    are rows whose `geo_ranks` contains `geo_level`; `cat_level` doesn't
-#'    constrain (Break down by is hidden in this mode in app.R already).
-#'  - category-is-fill (`geo_level` == "national", or a specific
-#'    `geo_unit` is picked): candidates are rows whose `categories`
-#'    contains `cat_level` (skipped if `cat_level == "none"`); if a
-#'    specific `geo_unit` is also active, additionally require `geo_ranks`
-#'    contains `geo_level`, since the geo filter and the category fill
-#'    need to be two different levels of the *same* table.
-#' Returns the matching subset of `rows` (0, 1, or several - several means
-#' a genuine Series ambiguity remains, see app.R's `series_candidates()`).
-match_candidates <- function(rows, geo_level, geo_unit, cat_level) {
-  geo_real <- !identical(geo_level, "national")
-  geo_all_units <- identical(geo_unit %||% "All", "All")
-
-  if (geo_real && geo_all_units) {
-    keep <- vapply(rows$geo_ranks, function(s) geo_level %in% s, logical(1))
-  } else {
-    keep <- rep(TRUE, nrow(rows))
-    if (!identical(cat_level %||% "none", "none")) {
-      keep <- keep & vapply(rows$categories, function(s) cat_level %in% s, logical(1))
-    }
-    if (geo_real && !geo_all_units) {
-      keep <- keep & vapply(rows$geo_ranks, function(s) geo_level %in% s, logical(1))
-    }
-  }
-  rows[keep, , drop = FALSE]
-}
+#' Note on why series_label is deliberately left un-deduplicated: an
+#' earlier version forced every series_label unique per theme, appending a
+#' geo_ranks/categories-derived qualifier on collision (e.g. "Permanent
+#' Residents (Age Group)" vs "... (Gender)") - reverted because it
+#' re-encoded exactly the information the Geographic Aggregation/Break
+#' down by selectors already convey (a user who'd already picked "Break
+#' down by = Age" then saw "(Age)" baked into the Series name too,
+#' redundantly), and a bare numeric fallback ("All admissions (2)") was no
+#' better once match_candidates() below started collapsing raw candidates
+#' to one row per distinct series_label itself - a uniqueness-forcing
+#' suffix there just defeated that collapse by making the text different
+#' again. Two tables sharing a series_label because they're genuinely the
+#' same series in different breakdown shapes (e.g. a dozen "Permanent
+#' Residents" tables, each with a different single category dimension) are
+#' *supposed* to look identical - match_candidates() is what keeps them
+#' from ever surfacing as separate, confusingly-identical Series options at
+#' once. A human editor typing an identical "Series (custom)" value across
+#' several tables (see data-raw/06_build_label_lookups.R) is making exactly
+#' that "these are one series" call on purpose; app/data/label_overrides.xlsx's
+#' `Source table title` column is there so they can spot and fix an
+#' accidental collision themselves if two rows sharing a label turn out
+#' not to actually belong together.
 
 #' Split the single "temporary_workers" catalog dataset into two themes -
 #' International Mobility Program (IMP) and Temporary Foreign Worker
@@ -897,36 +856,212 @@ to_percent_of_total <- function(d) {
     dplyr::ungroup()
 }
 
-#' End-to-end: fetch, aggregate, cap categories, append the Suppressed
-#' Residual (if computable), convert to percentages (if requested), and
-#' order both axes for plotting (periods chronologically; categories
-#' west-to-east for province/territory breakdowns, otherwise by ascending
-#' total value; see order_categories()).
+# ---------------------------------------------------------------------------
+# series_facts query layer (data-raw/08_build_series_facts.R builds the
+# table these read from - one canonical, deduplicated row per series/
+# facet/geography/period, already merged across every contributing source
+# table, so none of the functions below need to know about `table_id` or
+# do any cross-table merging themselves - that already happened upstream).
+# ---------------------------------------------------------------------------
+
+#' One row per (theme, series, facet, geo_level) combination actually
+#' present in `series_facts`, with just enough summary info to drive the
+#' UI without re-querying the full (multi-million-row) table on every
+#' input change: whether deeper breakdown_2/3 data exists, whether monthly
+#' data exists, whether it's a stock series, and its year range. Computed
+#' once at app startup (like `catalog`/`theme_dim_map` before it).
+build_series_summary <- function(con) {
+  dplyr::tbl(con, "series_facts") |>
+    dplyr::group_by(.data$theme, .data$series, .data$facet, .data$geo_level) |>
+    dplyr::summarise(
+      # how many geo_N columns are actually meaningful at this geo_level for
+      # this series - not a fixed per-rank constant, since e.g. a CMA-only
+      # source table has geo_depth 1 for "CMA" while another series' CMA
+      # rank is nested under its own PT level (geo_depth 2)
+      geo_depth = (as.integer(max(!is.na(.data$geo_1), na.rm = TRUE)) +
+                     as.integer(max(!is.na(.data$geo_2), na.rm = TRUE)) +
+                     as.integer(max(!is.na(.data$geo_3), na.rm = TRUE))),
+      has_breakdown_2 = max(!is.na(.data$breakdown_2), na.rm = TRUE) == 1,
+      has_breakdown_3 = max(!is.na(.data$breakdown_3), na.rm = TRUE) == 1,
+      has_month = max(.data$period_type == "month", na.rm = TRUE) == 1,
+      is_stock = max(.data$is_stock, na.rm = TRUE) == 1,
+      min_year = min(.data$period_year, na.rm = TRUE),
+      max_year = max(.data$period_year, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    dplyr::collect()
+}
+
+#' Distinct places available at one geo_level, for a specific facet's own
+#' rows (Geographic unit picker) - the series_facts analogue of
+#' list_geo_units(). `geo_depth` is how many geo_N columns are populated at
+#' this geo_level (1 for PT/CMA, 2 for CD, 3 for CSD). CD/CSD names recur
+#' across provinces, so for those the option *value* encodes the full
+#' geo_1..geo_depth ancestor prefix (GEO_UNIT_SEP-joined, same convention
+#' as list_geo_units()) and the *display* label gets a ", <province
+#' abbreviation>" suffix.
+list_series_geo_units <- function(con, theme, series, facet, geo_level, geo_depth) {
+  geo_cols <- paste0("geo_", seq_len(geo_depth))
+  d <- dplyr::tbl(con, "series_facts") |>
+    dplyr::filter(.data$theme == !!theme, .data$series == !!series, .data$facet == !!facet,
+                   .data$geo_level == !!geo_level) |>
+    dplyr::select(dplyr::all_of(geo_cols)) |>
+    dplyr::distinct() |>
+    dplyr::collect()
+  d <- d[stats::complete.cases(d), , drop = FALSE]
+  if (nrow(d) == 0) return(c("All" = "All"))
+
+  unit_value <- do.call(paste, c(as.list(d[geo_cols]), sep = GEO_UNIT_SEP))
+  place <- d[[geo_depth]]
+  display <- if (geo_depth == 1) {
+    place
+  } else {
+    abbr <- PROVINCE_ABBR[d[["geo_1"]]]
+    ifelse(!is.na(abbr), paste0(place, ", ", abbr), place)
+  }
+
+  ord <- if (identical(geo_level, "PT")) {
+    order(match(display, PROVINCE_ORDER_WEST_TO_EAST, nomatch = length(PROVINCE_ORDER_WEST_TO_EAST) + 1L))
+  } else {
+    order(display)
+  }
+  c("All" = "All", stats::setNames(unit_value[ord], display[ord]))
+}
+
+#' Distinct `breakdown_1` (or, filtered to one `breakdown_1` value,
+#' `breakdown_2`) values available for a series/facet/geo_level - choices
+#' for the cascading "drill into..." selectors (see app.R) that only
+#' appear when a facet's own nesting actually goes that deep
+#' (`has_breakdown_2`/`has_breakdown_3` in build_series_summary()).
+list_series_breakdown_values <- function(con, theme, series, facet, geo_level, drill_1 = NULL) {
+  q <- dplyr::tbl(con, "series_facts") |>
+    dplyr::filter(.data$theme == !!theme, .data$series == !!series, .data$facet == !!facet,
+                   .data$geo_level == !!geo_level)
+  col <- if (is.null(drill_1)) "breakdown_1" else {
+    q <- q |> dplyr::filter(.data$breakdown_1 == !!drill_1)
+    "breakdown_2"
+  }
+  q |> dplyr::filter(!is.na(.data[[col]])) |> dplyr::distinct(.data[[col]]) |>
+    dplyr::collect() |> dplyr::pull(1) |> sort()
+}
+
+#' Pull one (theme, series, facet, geo_level) view's rows out of
+#' `series_facts`, shaped for aggregate_series(): `entity_id` (every
+#' geo_N/breakdown_N column concatenated - the true leaf grain, needed so
+#' a stock series' "latest available month" resolution (aggregate_series())
+#' works the same way it always has, whichever grain these rows happen to
+#' be at), `category` (whichever column is the current display axis),
+#' `period_year/quarter/month`, `value`.
 #'
-#' `filter_level`/`filter_values`: optional geographic ancestor-prefix
-#' filter (see fetch_leaf_rows()) - independent of `level`, which is
-#' whichever level is currently the display category.
-#' `has_subtotals`: from `table_has_subtotals()`, gates whether a
-#' Suppressed Residual is attempted at all (flat tables never have one).
-#' `display_as`: `"absolute"` (default) or `"percent"`.
-build_plot_data <- function(con, table_id, n_levels, level, granularity, year_range, is_stock, top_n,
-                             has_month, level_label = NULL, filter_level = NULL, filter_values = NULL,
-                             has_subtotals = FALSE, display_as = "absolute") {
-  raw <- fetch_leaf_rows(con, table_id, n_levels, level, year_range, has_month, level_label,
-                         filter_level, filter_values)
+#' `geo_unit_prefix`: optional exact geo_1..k ancestor values (a specific
+#' Geographic unit chosen) - narrows to one place instead of showing every
+#' place at `geo_level` as its own category.
+#' `drill_1`/`drill_2`: optional breakdown_1/breakdown_2 *values* chosen
+#' via the cascading sub-breakdown selectors (see app.R) - when set, the
+#' category becomes the next-deeper breakdown column, filtered to that
+#' value, instead of breakdown_1 itself.
+fetch_series_rows <- function(con, theme, series, facet, geo_level, geo_depth, year_range,
+                               geo_unit_prefix = character(0), drill_1 = NULL, drill_2 = NULL) {
+  q <- dplyr::tbl(con, "series_facts") |>
+    dplyr::filter(
+      .data$theme == !!theme, .data$series == !!series, .data$facet == !!facet,
+      .data$geo_level == !!geo_level,
+      .data$period_year >= !!year_range[1], .data$period_year <= !!year_range[2]
+    )
+  for (i in seq_along(geo_unit_prefix)) {
+    col <- paste0("geo_", i)
+    q <- q |> dplyr::filter(.data[[col]] == !!geo_unit_prefix[i])
+  }
+  if (!is.null(drill_1)) q <- q |> dplyr::filter(.data$breakdown_1 == !!drill_1)
+  if (!is.null(drill_2)) q <- q |> dplyr::filter(.data$breakdown_2 == !!drill_2)
+
+  d <- q |>
+    dplyr::select("geo_1", "geo_2", "geo_3", "breakdown_1", "breakdown_2", "breakdown_3",
+                   "period_year", "period_quarter", "period_month", "value") |>
+    dplyr::collect()
+  if (nrow(d) == 0) return(d[0, ])
+
+  d$entity_id <- do.call(paste, c(lapply(d[c("geo_1", "geo_2", "geo_3", "breakdown_1", "breakdown_2", "breakdown_3")],
+                                          function(x) ifelse(is.na(x), "", x)), sep = "␟"))
+
+  if (identical(facet, "Total")) {
+    if (identical(geo_level, "National") || length(geo_unit_prefix) >= geo_depth) {
+      d$category <- "Total"
+    } else {
+      place_col <- paste0("geo_", geo_depth)
+      place <- d[[place_col]]
+      d$category <- if (geo_depth > 1) {
+        abbr <- PROVINCE_ABBR[d$geo_1]
+        ifelse(!is.na(abbr), paste0(place, ", ", abbr), place)
+      } else {
+        place
+      }
+    }
+  } else if (!is.null(drill_2)) {
+    d$category <- d$breakdown_3
+  } else if (!is.null(drill_1)) {
+    d$category <- d$breakdown_2
+  } else {
+    d$category <- d$breakdown_1
+  }
+
+  d[c("entity_id", "category", "period_year", "period_quarter", "period_month", "value")]
+}
+
+#' The canonical "published total" for this same (theme, series, geo_level,
+#' geo unit) scope, for the Suppressed Residual - series_facts's own
+#' facet = "Total" rows, already the least-suppressed value available
+#' across every contributing source table (see
+#' data-raw/08_build_series_facts.R) - not one table's own subtotal, so a
+#' Sex breakdown and an Occupation breakdown of the same series reconcile
+#' to the exact same total instead of each table's own slightly different
+#' published figure.
+fetch_series_published_total <- function(con, theme, series, geo_level, geo_depth, year_range,
+                                          geo_unit_prefix = character(0)) {
+  d <- fetch_series_rows(con, theme, series, "Total", geo_level, geo_depth, year_range, geo_unit_prefix)
+  if (nrow(d) == 0) return(NULL)
+  d |>
+    dplyr::group_by(.data$period_year, .data$period_quarter, .data$period_month) |>
+    dplyr::summarise(value = sum(.data$value, na.rm = TRUE), .groups = "drop")
+}
+
+#' End-to-end series_facts equivalent of build_plot_data(): fetch, roll up
+#' to the requested granularity (aggregate_series() - unchanged, already
+#' generic over whatever "entity"/"category" mean), cap categories, append
+#' the Suppressed Residual against the canonical series-wide total (not a
+#' single table's own subtotal - see fetch_series_published_total()),
+#' convert to percentages if requested, and order both axes.
+#'
+#' The residual is only ever computed at the *top* breakdown level (no
+#' `drill_1`/`drill_2`) - `fetch_series_published_total()` always returns the
+#' series' whole grand total, with no way to narrow it to "just the Economic
+#' category" or similar, since `series_facts`'s `facet = "Total"` rows are
+#' only ever the overall total, never a per-breakdown_1-value subtotal. Once
+#' a drill is active, `raw`/`agg` are already filtered down to that one
+#' breakdown_1 (and maybe breakdown_2) value, so comparing their sum against
+#' the *whole-series* total would count everything outside the current drill
+#' as "suppressed" - not a real suppression signal, just every other category
+#' the user isn't currently looking at (found from a user report: British
+#' Columbia / Immigration Category / Economic / Business showed as almost
+#' entirely Suppressed Residual, because the comparison was against all of
+#' BC's admissions, not just its Economic-category ones).
+build_series_plot_data <- function(con, theme, series, facet, geo_level, geo_depth, granularity,
+                                    year_range, is_stock, top_n, display_as = "absolute",
+                                    geo_unit_prefix = character(0), drill_1 = NULL, drill_2 = NULL) {
+  raw <- fetch_series_rows(con, theme, series, facet, geo_level, geo_depth, year_range,
+                            geo_unit_prefix, drill_1, drill_2)
   agg <- aggregate_series(raw, granularity, is_stock)
 
-  # Suppressed Residual: the real published total for this same filter
-  # context, minus the sum actually visible *before* any top-N collapsing
-  # - top-N/"Other" is a display simplification, not a data limitation, so
-  # it must not affect how much residual there "should" be.
   residual_rows <- NULL
-  if (isTRUE(has_subtotals) && nrow(agg) > 0) {
-    published <- fetch_published_total(
-      con, table_id, prefix_level = filter_level %||% 0, prefix_values = filter_values %||% character(0),
-      year_range = year_range, has_month = has_month, is_stock = is_stock, granularity = granularity
-    )
-    if (!is.null(published)) {
+  if (nrow(agg) > 0 && is.null(drill_1)) {
+    published_raw <- fetch_series_published_total(con, theme, series, geo_level, geo_depth,
+                                                    year_range, geo_unit_prefix)
+    if (!is.null(published_raw) && nrow(published_raw) > 0) {
+      published_raw$entity_id <- "total"
+      published_raw$category <- "total"
+      published <- aggregate_series(published_raw, granularity, is_stock) |>
+        dplyr::transmute(.data$period_display, published_total = .data$value)
+
       visible_totals <- agg |>
         dplyr::group_by(.data$period_display, .data$period_sort) |>
         dplyr::summarise(visible_total = sum(.data$value, na.rm = TRUE), .groups = "drop")
@@ -966,6 +1101,27 @@ build_plot_data <- function(con, table_id, n_levels, level, granularity, year_ra
   out
 }
 
+#' Every raw table_id that actually contributed at least one row to a
+#' (theme, series, geo_level[, geo unit]) view - for the citation, which
+#' now potentially spans several source tables since a "Total" view merges
+#' across every sibling that offers that geography (see
+#' data-raw/08_build_series_facts.R). Falls back to every source_table_id
+#' for the whole series if the specific geo scope has no rows (e.g. a
+#' still-loading selection).
+series_source_table_ids <- function(con, theme, series, facet = NULL, geo_level = NULL) {
+  q <- dplyr::tbl(con, "series_facts") |>
+    dplyr::filter(.data$theme == !!theme, .data$series == !!series)
+  if (!is.null(facet)) q <- q |> dplyr::filter(.data$facet == !!facet)
+  if (!is.null(geo_level)) q <- q |> dplyr::filter(.data$geo_level == !!geo_level)
+  ids <- q |> dplyr::distinct(.data$source_table_id) |> dplyr::collect() |> dplyr::pull(.data$source_table_id)
+  if (length(ids) == 0) {
+    ids <- dplyr::tbl(con, "series_facts") |>
+      dplyr::filter(.data$theme == !!theme, .data$series == !!series) |>
+      dplyr::distinct(.data$source_table_id) |> dplyr::collect() |> dplyr::pull(.data$source_table_id)
+  }
+  ids
+}
+
 #' Pull the 8-char hash prefix out of a table_id ("dataset/hash__slug") -
 #' used to join back to data-raw/manifest.csv, which is keyed by the full
 #' CKAN resource_id (hash = substr(resource_id, 1, 8)). Synthetic/derived
@@ -998,4 +1154,26 @@ build_source_lookup <- function(manifest) {
     ) |>
     dplyr::select("hash", "agency", "table_name", "format", "url", "dataset_url", "updated_at") |>
     dplyr::distinct(.data$hash, .keep_all = TRUE)
+}
+
+#' The full, uncut citation title for one table - plain text, not the HTML
+#' `table_citation_ui()` (app.R) renders. Same hash/sibling-fallback lookup
+#' against `source_lookup` (see build_source_lookup()) as that function
+#' uses, so a report built from this reflects exactly what the app's own
+#' citation shows - not `catalog$table_title`, which can carry an internal
+#' multi-sheet suffix (see title_for_slug() in data-raw/05_build_duckdb.R)
+#' the citation never displays. Shared by data-raw/06_build_label_lookups.R
+#' (so `label_overrides.xlsx` shows editors which real source table a
+#' table_id corresponds to) and data-raw/07_build_series_reference.R.
+citation_title_for <- function(table_id, sibling_ids, source_lookup) {
+  hash <- extract_table_hash(table_id)
+  hashes <- if (!is.na(hash)) {
+    hash
+  } else {
+    sibling_hashes <- vapply(sibling_ids, extract_table_hash, character(1))
+    unique(sibling_hashes[!is.na(sibling_hashes)])
+  }
+  rows <- source_lookup[source_lookup$hash %in% hashes, , drop = FALSE]
+  if (nrow(rows) == 0) return(NA_character_)
+  paste(unique(rows$table_name), collapse = "; ")
 }

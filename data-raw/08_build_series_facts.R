@@ -1,0 +1,381 @@
+# Builds app/data/immigration.duckdb's `series_facts` table: one row per
+# genuinely distinct (theme, series, breakdown facet/depth, geography,
+# period) fact, already deduplicated across every source table that
+# contributes to it. This is the fix for a problem query-time table
+# selection couldn't solve: many tables within one series independently
+# publish the same underlying total (e.g. a province's grand total) - one
+# broken down by Sex, another by Intended Occupation, another by CD/CSD -
+# each with its own suppression pattern, so the number shown depended on
+# which sibling table happened to get picked for a given query. Here, that
+# duplication is resolved once, at the row level, not by choosing one
+# table to represent a whole series.
+#
+# Two kinds of rows, per (theme, series):
+#  - facet = "Total": the shared, no-breakdown total at every geography
+#    level (National, and whichever of PT/CMA/CD/CSD any member table
+#    supports) - built by pulling each qualifying member table's OWN
+#    published subtotal rows at that geo depth (table_geo_subtotals() in
+#    app/R/app_utils.R), unioning across tables, and for every
+#    (geography, period) cell taking the LARGEST reported value.
+#    Suppression only ever removes value from a published sum, never
+#    inflates it, so whichever sibling has the least suppression for that
+#    specific cell reports the highest, most-complete number - confirmed
+#    with the user as the merge rule. The winning table_id is kept in
+#    `source_table_id` for traceability.
+#  - facet = <a real breakdown name> (e.g. "Age Group", "Immigration
+#    Category"): a member table's own leaf rows (table_facet_leaf_rows()),
+#    reshaped into geo_1.. / breakdown_1.. columns. Usually only one
+#    member table offers a given facet at all, so this is a plain union;
+#    when more than one does (the French-Speaking PR "Immigration
+#    Category" family - four sheets at different nesting/geo depth is the
+#    concrete example already in this repo), they're unioned and any
+#    genuinely overlapping cells get the same max-value merge as "Total"
+#    rows. Different geo/depth coverage between siblings (one has a real
+#    Province dimension, another goes one level deeper in the category
+#    itself) is complementary, not overlapping, and both are kept as-is.
+#
+# Raw `facts`/`catalog` (from 05_build_duckdb.R) are untouched - this
+# reads them and writes a new, additional table alongside them. Must run
+# after 06_build_label_lookups.R, since it reads `catalog$series_label`
+# and the already-corrected `level_N_label` columns that script bakes in.
+
+library(DBI)
+library(duckdb)
+library(dplyr)
+
+source("app/R/app_utils.R")
+
+DB_PATH <- "app/data/immigration.duckdb"
+
+if (!file.exists(DB_PATH)) {
+  stop("app/data/immigration.duckdb not found - run 05_build_duckdb.R then 06_build_label_lookups.R first")
+}
+
+GEO_RANKS_ORDER <- c("PT", "CMA", "CD", "CSD")
+
+#' The strict, exhaustively-nested geographic hierarchy this pipeline can
+#' safely sum up: every Census Subdivision sits in exactly one Census
+#' Division, every Census Division in exactly one Province/Territory, and
+#' every Province/Territory sums to Canada - so a series' own PT-level
+#' breakdown rows can be summed straight into a true National figure, CD
+#' rows into their PT, etc. (see roll_up_facet_geo() below). CMA is
+#' deliberately excluded: Census Metropolitan Areas don't exhaustively
+#' cover a province (a lot of rural/non-metro population sits outside every
+#' CMA), so summing a series' CMA-level rows would understate its true
+#' PT/National total rather than equal it - CMA-level facet rows are never
+#' rolled up or down.
+GEO_HIERARCHY <- c("National", "PT", "CD", "CSD")
+
+con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
+catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
+dim_map <- build_theme_dimension_map(catalog)
+
+#' This table's own geographic level positions and (if any) facet name/
+#' positions, from its precomputed `classification` (see
+#' build_theme_dimension_map()). Returns *positions* (`geo_positions`/
+#' `facet_positions`), not just a depth count: a table can have a filler
+#' column (see FILLER_LEVEL_REGEX) sitting between its geography and its
+#' real facet - e.g. IRCC's "Top 25 Countries of Citizenship" family has
+#' Province/Territory (geo, position 1), a literal 1-25 "Country Rank"
+#' (filler, position 2), then Country of Citizenship (the real facet,
+#' position 3) - so geo_depth can't just be "facet_pos[1] - 1" (that would
+#' wrongly count the filler as part of geography); the filler position must
+#' be excluded from both the geo and facet position sets entirely, not
+#' folded into either.
+#'
+#' `cl$is_filler` alone isn't trustworthy for a *generic-fallback* label
+#' (GENERIC_FALLBACK_LABEL_REGEX, app/R/app_utils.R), though: it's set purely
+#' from label text, and that same fallback text also appears whenever a
+#' table's title under-names how deep its row hierarchy actually nests -
+#' e.g. a title reading "... and Program" when the source data splits
+#' "Program" across 4 real nested sub-levels (see
+#' reports/database_coverage_report.qmd #2.4, temporary_workers/520ac8e1). A
+#' label-only filler check can't tell that case apart from genuine empty
+#' padding, so a *generic-fallback* position is re-checked against the real
+#' data (level_has_real_data(), app/R/app_utils.R) before being trusted as
+#' filler - a populated "Category Level N" column is treated as a real facet
+#' position instead, keeping its generic label rather than dropping the data
+#' it holds. Other filler patterns (e.g. "... Rank" - a purely ordinal
+#' position column, real numbers but not a real category) are deliberately
+#' NOT reconsidered this way: unlike a generic fallback, holding real data
+#' doesn't make a rank column a real breakdown, so it must stay excluded from
+#' this override or it would wrongly resurface as a facet (as it did before
+#' this distinction existed - see FILLER_LEVEL_REGEX's own comment).
+table_shape <- function(cl, con, table_id) {
+  is_generic_fallback <- grepl(GENERIC_FALLBACK_LABEL_REGEX, cl$label, ignore.case = TRUE)
+  really_filler <- cl$is_filler & !(is_generic_fallback & vapply(seq_len(nrow(cl)), function(i) {
+    if (!is_generic_fallback[i]) return(FALSE)
+    level_has_real_data(con, table_id, paste0("level_", cl$level_index[i]))
+  }, logical(1)))
+
+  geo_positions <- which(!is.na(cl$geo_rank))
+  facet_positions <- which(is.na(cl$geo_rank) & !really_filler)
+  geo_depth <- length(geo_positions)
+  geo_rank <- if (geo_depth > 0) utils::tail(cl$geo_rank[geo_positions], 1) else NA_character_
+  if (length(facet_positions) == 0) {
+    list(geo_depth = geo_depth, geo_rank = geo_rank, has_facet = FALSE, facet_name = NA_character_,
+         n_facet_levels = 0L, geo_positions = geo_positions, facet_positions = integer(0))
+  } else {
+    list(geo_depth = geo_depth, geo_rank = geo_rank, has_facet = TRUE,
+         facet_name = cl$label_normalized[facet_positions[1]],
+         n_facet_levels = length(facet_positions),
+         geo_positions = geo_positions, facet_positions = facet_positions)
+  }
+}
+
+#' A table that only ever publishes annual totals (period_month always
+#' NA) is redundant for any specific year where some *other* contributing
+#' table in the same merge has real monthly data - keeping both would
+#' leave two entries for that year at different grains (a real Q1-Q4
+#' breakdown from the monthly table, plus an extra whole-year value with
+#' no period_quarter/period_month of its own) that don't share an exact
+#' merge key, so both survive merge_max() instead of one replacing the
+#' other - then rolling up to Quarterly/Monthly granularity sums the real
+#' quarters/months *and* that extra whole-year value together, inflating
+#' the total (discovered in Study Permit Holders' "All permits (at
+#' December 31)": a monthly-published pair of tables (2015-2018) overlaps
+#' a decades-long annual-only pair (2000-2024) for exactly those years).
+#' Drops an annual-only piece's rows for any period_year where some other
+#' piece in the same merge has real month data - keeps it for every other
+#' year, where it's the only source available.
+prefer_finest_grain <- function(pieces) {
+  years_with_month <- unique(unlist(lapply(pieces, function(d) {
+    if (any(!is.na(d$period_month))) unique(d$period_year[!is.na(d$period_month)]) else integer(0)
+  })))
+  if (length(years_with_month) == 0) return(pieces)
+  lapply(pieces, function(d) {
+    is_annual_only <- !any(!is.na(d$period_month))
+    if (is_annual_only) d[!(d$period_year %in% years_with_month), , drop = FALSE] else d
+  })
+}
+
+#' Merge candidate rows (one data.frame per contributing table, each with a
+#' `source_table_id` column already attached) down to one row per distinct
+#' key column set, keeping the row with the largest `value` - "least
+#' suppressed sibling wins" (see this script's header comment).
+merge_max <- function(pieces, key_cols) {
+  pieces <- pieces[vapply(pieces, function(d) !is.null(d) && nrow(d) > 0, logical(1))]
+  if (length(pieces) == 0) return(NULL)
+  combined <- bind_rows(pieces) |> filter(!is.na(.data$value))
+  if (nrow(combined) == 0) return(NULL)
+  combined |>
+    group_by(across(all_of(key_cols))) |>
+    slice_max(order_by = .data$value, n = 1, with_ties = FALSE) |>
+    ungroup()
+}
+
+build_total_rows <- function(members, geo_rank, geo_level_idx_lookup) {
+  # geo_rank is "National" (geo_level_idx 0, every member qualifies) or one
+  # of PT/CMA/CD/CSD (only members whose own geo_ranks include it)
+  pieces <- lapply(seq_len(nrow(members)), function(i) {
+    m <- members[i, ]
+    if (identical(geo_rank, "National")) {
+      idx <- 0L
+    } else {
+      if (!(geo_rank %in% unlist(m$geo_ranks))) return(NULL)
+      idx <- geo_level_idx_lookup(m$classification[[1]], geo_rank)
+    }
+    d <- table_geo_subtotals(con, m$table_id, idx, m$has_month)
+    if (nrow(d) == 0) return(NULL)
+    d$source_table_id <- m$table_id
+    d$is_stock <- isTRUE(m$is_stock)
+    d
+  })
+  pieces <- purrr::compact(pieces)
+  if (length(pieces) == 0) return(NULL)
+
+  geo_cols <- if (identical(geo_rank, "National")) character(0) else {
+    max_depth <- max(vapply(pieces, function(d) sum(grepl("^geo_", names(d))), integer(1)))
+    paste0("geo_", seq_len(max_depth))
+  }
+  # pad any missing geo_N columns (siblings can differ in depth for the
+  # same rank - shouldn't happen for PT itself, but keep this safe)
+  pieces <- lapply(pieces, function(d) {
+    for (col in geo_cols) if (!(col %in% names(d))) d[[col]] <- NA_character_
+    d
+  })
+
+  pieces <- prefer_finest_grain(pieces)
+
+  # is_stock must partition the merge - a stock (point-in-time) value and
+  # a flow (period total) value are different quantities and must never
+  # be merged into the same cell even if they happen to share a period
+  by_stock <- split(pieces, vapply(pieces, function(d) unique(d$is_stock)[1], logical(1)))
+  out <- lapply(by_stock, function(grp) {
+    merge_max(grp, c(geo_cols, "period_year", "period_quarter", "period_month"))
+  })
+  out <- bind_rows(purrr::compact(out))
+  if (nrow(out) == 0) return(NULL)
+
+  out$geo_level <- geo_rank
+  out$facet <- "Total"
+  out$breakdown_1 <- NA_character_
+  out$breakdown_2 <- NA_character_
+  out$breakdown_3 <- NA_character_
+  for (i in 1:3) {
+    col <- paste0("geo_", i)
+    if (!(col %in% names(out))) out[[col]] <- NA_character_
+  }
+  out
+}
+
+#' Roll a facet's own PT/CD/CSD-level rows up to every coarser level in
+#' GEO_HIERARCHY (summed - see that constant's comment for why this is safe
+#' for PT/CD/CSD but never for CMA). Run AFTER the max-merge across sibling
+#' tables at each geo_level, so a rollup sums the series' own canonical,
+#' already-deduplicated entity values, not a single raw table's own
+#' (possibly more-suppressed) figures. Rolled-up rows are then merged with
+#' whatever the series already has directly at that coarser level (same
+#' "largest value wins" rule as everywhere else in this script), in case
+#' some sibling table already publishes that coarser breakdown outright -
+#' the rollup is a candidate value for that cell, not assumed to be the only
+#' one.
+#'
+#' Discovered from a user report: "All admissions" (permanent_residents) had
+#' Age Group/Gender/Immigration Category/Intended Occupation only at PT, and
+#' Country of Citizenship only at National, with no way to see the PT-only
+#' breakdowns nationally even though every one of them sums straightforwardly
+#' to a true national figure - "everything available at a smaller geography
+#' should be available at a larger one" (the reverse - National-only data
+#' appearing at PT - genuinely isn't possible without inventing numbers, so
+#' this only ever rolls finer geography up to coarser, never the other way).
+roll_up_facet_geo <- function(d) {
+  present <- intersect(GEO_HIERARCHY, unique(d$geo_level))
+  rolled <- list()
+  for (gl in present) {
+    gl_idx <- match(gl, GEO_HIERARCHY)
+    if (gl_idx <= 1) next  # National has nothing coarser to roll into
+    src <- d[d$geo_level == gl, , drop = FALSE]
+    for (coarser_idx in seq_len(gl_idx - 1)) {
+      coarser <- GEO_HIERARCHY[coarser_idx]
+      depth <- coarser_idx - 1L  # National = 0, PT = 1, CD = 2
+      geo_keep <- if (depth > 0) paste0("geo_", seq_len(depth)) else character(0)
+      key_cols <- c(geo_keep, "breakdown_1", "breakdown_2", "breakdown_3",
+                    "period_year", "period_quarter", "period_month", "is_stock")
+      r <- src |>
+        dplyr::group_by(dplyr::across(dplyr::all_of(key_cols))) |>
+        dplyr::summarise(value = sum(.data$value, na.rm = TRUE),
+                          source_table_id = dplyr::first(.data$source_table_id),
+                          .groups = "drop")
+      r$geo_level <- coarser
+      for (i in 1:3) {
+        col <- paste0("geo_", i)
+        if (!(col %in% names(r)) || i > depth) r[[col]] <- NA_character_
+      }
+      rolled[[paste(gl, coarser)]] <- r
+    }
+  }
+  if (length(rolled) == 0) return(d)
+
+  combined <- bind_rows(d, bind_rows(rolled))
+  by_geo <- split(combined, combined$geo_level)
+  out <- lapply(by_geo, function(sub) {
+    geo_cols <- grep("^geo_", names(sub), value = TRUE)
+    by_stock <- split(sub, sub$is_stock)
+    merge_max(by_stock, c(geo_cols, "breakdown_1", "breakdown_2", "breakdown_3",
+                           "period_year", "period_quarter", "period_month"))
+  })
+  bind_rows(purrr::compact(out))
+}
+
+build_facet_rows <- function(members) {
+  shapes <- lapply(seq_len(nrow(members)), function(i) {
+    table_shape(members$classification[[i]], con, members$table_id[i])
+  })
+  has_facet <- vapply(shapes, `[[`, logical(1), "has_facet")
+  if (!any(has_facet)) return(NULL)
+
+  facet_names <- vapply(shapes, function(s) if (isTRUE(s$has_facet)) s$facet_name else NA_character_,
+                         character(1))
+  pieces_by_facet <- list()
+  for (fname in unique(stats::na.omit(facet_names))) {
+    idx_tables <- which(facet_names == fname)
+    pieces <- lapply(idx_tables, function(i) {
+      m <- members[i, ]
+      s <- shapes[[i]]
+      d <- table_facet_leaf_rows(con, m$table_id, m$n_levels, s$geo_positions, s$facet_positions, m$has_month)
+      if (nrow(d) == 0) return(NULL)
+      if (s$n_facet_levels > MAX_BREAKDOWN_LEVELS) {
+        cli::cli_alert_warning("{m$table_id}: facet '{fname}' has {s$n_facet_levels} levels, capping at {MAX_BREAKDOWN_LEVELS}")
+      }
+      d$source_table_id <- m$table_id
+      d$is_stock <- isTRUE(m$is_stock)
+      d$geo_level <- if (s$geo_depth == 0) "National" else s$geo_rank
+      d
+    })
+    pieces <- purrr::compact(pieces)
+    if (length(pieces) == 0) next
+    # scoped per geo_level - a facet can draw from siblings at different
+    # geo levels (e.g. one table's National-only rows plus another's
+    # PT-level rows for the same facet), and an annual-only National
+    # piece must not be dropped just because an unrelated PT-level
+    # sibling happens to have monthly data
+    by_geo <- split(pieces, vapply(pieces, function(d) unique(d$geo_level)[1], character(1)))
+    pieces <- unlist(lapply(by_geo, prefer_finest_grain), recursive = FALSE)
+
+    by_stock <- split(pieces, vapply(pieces, function(d) unique(d$is_stock)[1], logical(1)))
+    merged <- lapply(by_stock, function(grp) {
+      key_cols <- c("geo_level", grep("^geo_", names(grp[[1]]), value = TRUE),
+                    grep("^breakdown_", names(grp[[1]]), value = TRUE),
+                    "period_year", "period_quarter", "period_month")
+      merge_max(grp, key_cols)
+    })
+    merged <- bind_rows(purrr::compact(merged))
+    if (nrow(merged) == 0) next
+    merged <- roll_up_facet_geo(merged)
+    merged$facet <- fname
+    pieces_by_facet[[fname]] <- merged
+  }
+  if (length(pieces_by_facet) == 0) return(NULL)
+  bind_rows(pieces_by_facet)
+}
+
+geo_level_idx_lookup <- function(cl, geo_rank) {
+  cl$level_index[match(geo_rank, cl$geo_rank)]
+}
+
+cli::cli_h1("Building series_facts")
+# a blank series_label is a valid group too - a table with no distinguishing
+# series text still needs its own (theme, "") group like any other
+all_series <- unique(dim_map[, c("dataset", "series_label")])
+
+results <- purrr::pmap(all_series, function(dataset, series_label) {
+  members <- dim_map[dim_map$dataset == dataset & dim_map$series_label == series_label, , drop = FALSE]
+
+  geo_ranks_present <- unique(unlist(members$geo_ranks))
+  total_rows <- lapply(c("National", intersect(GEO_RANKS_ORDER, geo_ranks_present)), function(gr) {
+    build_total_rows(members, gr, geo_level_idx_lookup)
+  })
+  total_rows <- bind_rows(purrr::compact(total_rows))
+
+  facet_rows <- build_facet_rows(members)
+
+  out <- bind_rows(total_rows, facet_rows)
+  if (nrow(out) == 0) return(NULL)
+  out$theme <- dataset
+  out$series <- series_label
+  out
+}, .progress = "Merging series")
+
+series_facts <- bind_rows(purrr::compact(results))
+
+# period_type: mirrors `facts` - "month" when period_month is populated,
+# else "year" (this catalog's tables are always one or the other per row,
+# never mixed within a single query result, since each contributing fetch
+# was already filtered to has_month's own single period_type_filter)
+series_facts$period_type <- ifelse(!is.na(series_facts$period_month), "month", "year")
+
+series_facts <- series_facts |>
+  select(theme, series, facet, breakdown_1, breakdown_2, breakdown_3,
+         geo_level, geo_1, geo_2, geo_3,
+         period_type, period_year, period_quarter, period_month,
+         value, is_stock, source_table_id)
+
+dbDisconnect(con, shutdown = TRUE)
+
+con2 <- dbConnect(duckdb(), DB_PATH, read_only = FALSE)
+dbWriteTable(con2, "series_facts", series_facts, overwrite = TRUE)
+dbExecute(con2, "CREATE INDEX idx_series_facts_theme_series ON series_facts(theme, series)")
+dbDisconnect(con2, shutdown = TRUE)
+
+cli::cli_alert_success("Wrote {format(nrow(series_facts), big.mark = ',')} rows to series_facts ({length(unique(paste(series_facts$theme, series_facts$series)))} theme/series pairs)")

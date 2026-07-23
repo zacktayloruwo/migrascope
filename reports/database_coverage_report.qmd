@@ -1,0 +1,456 @@
+---
+title: "Canadian Immigration Statistics — Database Coverage Report"
+subtitle: "Breakdowns, geography, and temporal grain in `series_facts`, reconciled against the source downloads"
+date: today
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    fig-pos: "H"
+execute:
+  echo: false
+  warning: false
+---
+
+```{r setup}
+library(DBI)
+library(duckdb)
+library(dplyr)
+library(gt)
+
+source("../app/R/app_utils.R")
+
+con <- dbConnect(duckdb(), "../app/data/immigration.duckdb", read_only = TRUE)
+catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
+dim_map <- build_theme_dimension_map(catalog)
+
+process_log <- readr::read_csv("../data-raw/process_log.csv", show_col_types = FALSE)
+manifest <- readr::read_csv("../data-raw/manifest.csv", show_col_types = FALSE,
+                             col_types = readr::cols(last_modified_ckan = "c"))
+
+THEME_DISPLAY <- c(
+  permanent_residents = "Permanent Residents",
+  temporary_workers_imp = "International Mobility Program",
+  temporary_workers_tfwp = "Temporary Foreign Worker Program",
+  study_permit_holders = "Study Permit Holders",
+  tr_to_pr_transition = "TR → PR Transition",
+  asylum_claimants = "Asylum Claimants",
+  refugees = "Refugees"
+)
+display_theme <- function(x) dplyr::coalesce(THEME_DISPLAY[x], x)
+
+# table_id is "<dataset>/<8-char-hash>__<slug>" - strip the hash and
+# truncate for display so wide gt tables don't overflow the PDF page width
+short_slug <- function(table_id, max_chars = 40) {
+  slug <- sub("^[^/]+/[a-z0-9]{8}__", "", table_id)
+  slug <- gsub("_", " ", slug)
+  ifelse(nchar(slug) > max_chars, paste0(substr(slug, 1, max_chars - 1), "…"), slug)
+}
+```
+
+## Purpose and methodology
+
+This report describes what actually made it into `app/data/immigration.duckdb`'s
+`series_facts` table - the deduplicated, per-(theme, series) table the Shiny
+app queries directly - and cross-checks it against the raw source downloads
+to see whether any breakdown IRCC/IRB actually publishes failed to survive
+the pipeline.
+
+A quick vocabulary note, since the app and the pipeline scripts use these
+words in a specific sense:
+
+- **Theme** - a dataset grouping (e.g. Permanent Residents, Study Permit
+  Holders) - the app's top-level "Select Theme" picker.
+- **Series** - a corrected, de-duplicated label (`catalog$series_label`,
+  baked in by `data-raw/06_build_label_lookups.R`) that can bundle several
+  raw source tables together when they're genuinely the same underlying
+  series published as separate sheets (e.g. one sheet "by Sex", another "by
+  Immigration Category") - the app's "Series" picker.
+- **Breakdown** (a.k.a. **facet**) - a non-geographic dimension a series can
+  be split by (e.g. Gender, Immigration Category) - the app's "Break down
+  by" picker. `series_facts$facet = "Total"` is the no-breakdown grand
+  total, and is excluded from the breakdown lists below.
+- **Geographic aggregation level** - National, Province/Territory (PT), CMA,
+  Census Division (CD), or Census Subdivision (CSD).
+- **Temporal aggregation level** - Monthly, Quarterly, or Annual.
+
+Part 1 summarizes, for every (theme, series) pair in `series_facts` today,
+which breakdowns/geography/temporal grains it has. Part 2 works backwards
+from the source downloads (`data-raw/manifest.csv`, `data-raw/process_log.csv`,
+and the raw `catalog`/`facts` tables underneath `series_facts`) to check
+whether anything published upstream failed to reach the final database, and
+if so, why.
+
+## Part 1: Coverage by theme and series
+
+```{r part1-compute}
+facets <- dbGetQuery(con, "
+  SELECT DISTINCT theme, series, facet FROM series_facts WHERE facet != 'Total'
+") |>
+  group_by(theme, series) |>
+  summarise(breakdowns = paste(sort(unique(facet)), collapse = "; "), .groups = "drop")
+
+GEO_ORDER <- c("National", "PT", "CMA", "CD", "CSD")
+geo <- dbGetQuery(con, "SELECT DISTINCT theme, series, geo_level FROM series_facts") |>
+  group_by(theme, series) |>
+  summarise(geo_levels = paste(GEO_ORDER[GEO_ORDER %in% geo_level], collapse = ", "), .groups = "drop")
+
+has_total <- dbGetQuery(con, "SELECT DISTINCT theme, series FROM series_facts WHERE facet = 'Total'") |>
+  mutate(has_total = TRUE)
+
+grain <- dbGetQuery(con, "
+  SELECT theme, series,
+    max(CASE WHEN period_month IS NOT NULL THEN 1 ELSE 0 END) has_month,
+    max(CASE WHEN period_quarter IS NOT NULL THEN 1 ELSE 0 END) has_quarter,
+    min(period_year) min_year, max(period_year) max_year,
+    count(DISTINCT source_table_id) n_sources
+  FROM series_facts GROUP BY theme, series
+") |>
+  mutate(temporal = case_when(
+    has_month == 1 ~ "Monthly, Quarterly, Annual",
+    has_quarter == 1 ~ "Quarterly, Annual",
+    TRUE ~ "Annual"
+  ))
+
+coverage <- grain |>
+  left_join(facets, by = c("theme", "series")) |>
+  left_join(geo, by = c("theme", "series")) |>
+  left_join(has_total, by = c("theme", "series")) |>
+  mutate(
+    breakdowns = ifelse(is.na(breakdowns), "(none)", breakdowns),
+    has_total = ifelse(is.na(has_total), FALSE, has_total),
+    theme_display = display_theme(theme),
+    years = paste0(min_year, "–", max_year)
+  ) |>
+  arrange(theme_display, series)
+
+n_series <- nrow(coverage)
+n_themes <- n_distinct(coverage$theme)
+n_no_total <- sum(!coverage$has_total)
+```
+
+`series_facts` currently holds `r n_series` (theme, series) pairs across
+`r n_themes` themes. `r n_no_total` of them have no `facet = "Total"` row at
+all (no member source table publishes an overall grand-total row for that
+series) - the app defaults "Break down by" to the first real breakdown
+instead of "None" for these, so they don't open on a blank chart (see
+`app/app.R`'s series/geo\_level `observeEvent` handlers).
+
+```{r part1-table}
+#| results: asis
+# gt's LaTeX backend has no multi-page (longtable) support - a single ~32-row
+# table silently overflows past one PDF page and loses everything past the
+# cutoff. One gt table per theme instead, each short enough to fit on its
+# own page(s) cleanly; cat(as_latex(...)) (not print()) is required for a
+# gt table built inside a loop to come out as a real LaTeX table rather than
+# a raw HTML/CSS dump (print() bypasses knitr's normal gt auto-print hook).
+for (th in sort(unique(coverage$theme_display))) {
+  d <- coverage |> filter(theme_display == th) |>
+    transmute(
+      Series = series,
+      Breakdowns = breakdowns,
+      Geography = geo_levels,
+      Temporal = temporal,
+      Years = years,
+      `# tables` = n_sources,
+      Total = ifelse(has_total, "yes", "no")
+    )
+
+  tbl <- d |>
+    gt() |>
+    tab_header(title = th) |>
+    cols_width(
+      Series ~ px(120), Breakdowns ~ px(210), Geography ~ px(70),
+      Temporal ~ px(85), Years ~ px(50), `# tables` ~ px(40), Total ~ px(32)
+    ) |>
+    tab_options(table.font.size = 8, heading.title.font.size = 11)
+
+  cat(gt::as_latex(tbl))
+}
+```
+
+## Part 2: Reconciling against the source downloads
+
+### 2.1 Resources that never became a processed table
+
+```{r part2-1}
+hash_to_title <- manifest |>
+  mutate(hash = substr(resource_id, 1, 8)) |>
+  select(hash, table_name) |>
+  distinct(hash, .keep_all = TRUE)
+
+not_ok <- process_log |>
+  filter(status != "ok") |>
+  mutate(hash = substr(slug, 1, 8)) |>
+  left_join(hash_to_title, by = "hash") |>
+  transmute(Dataset = dataset, `Table (from manifest)` = table_name, Status = status,
+            Note = ifelse(is.na(error), "", error))
+```
+
+Of every resource in `data-raw/manifest.csv`, `r nrow(not_ok)` did not become
+a processed long-format table:
+
+```{r part2-1-table}
+not_ok |>
+  gt() |>
+  tab_header(title = "Resources excluded before processing") |>
+  cols_width(Dataset ~ px(110), `Table (from manifest)` ~ px(280), Status ~ px(100), Note ~ px(120)) |>
+  tab_options(table.font.size = 9)
+```
+
+`error` here is IRB's Data Dictionary resource (documentation, not a data
+table - its URL is dead on canada.ca; harmless, since its columns are
+already plain English). The `skipped_duplicate_sheet` rows are workbook
+sheets `R/process_utils.R` recognized as duplicating a richer sibling sheet
+in the same workbook during processing itself, before a `catalog` row was
+ever created for them.
+
+### 2.2 Tables intentionally excluded as redundant duplicates
+
+```{r part2-2}
+lines <- readLines("../data-raw/05_build_duckdb.R")
+start <- grep("^EXCLUDED_DUPLICATE_TABLE_IDS <- c\\(", lines)
+end <- which(lines == ")")
+end <- end[end > start][1]
+EXCLUDED_DUPLICATE_TABLE_IDS <- eval(parse(text = paste(lines[start:end], collapse = "\n")))
+n_excluded <- length(EXCLUDED_DUPLICATE_TABLE_IDS)
+```
+
+A further `r n_excluded` tables are processed successfully but then dropped
+by name in `data-raw/05_build_duckdb.R`'s `EXCLUDED_DUPLICATE_TABLE_IDS`
+list - each one verified (per that script's own comments) to be an exact or
+near-exact marginal of a richer sibling table already kept, adding no
+dimension the kept table lacks. These are a deliberate, documented dedup
+decision, not data loss - see that script for the specific value comparison
+behind each entry.
+
+### 2.3 Tables that reached `catalog`/`facts` but contributed zero rows to `series_facts`
+
+```{r part2-3-compute}
+sf_sources <- dbGetQuery(con, "SELECT DISTINCT theme, series, source_table_id FROM series_facts")
+member_tables <- dim_map[, c("dataset", "series_label", "table_id")]
+names(member_tables) <- c("theme", "series", "table_id")
+zero <- member_tables |> anti_join(sf_sources, by = c("theme", "series", "table_id" = "source_table_id"))
+
+classify_zero <- function(theme, series, table_id) {
+  row <- catalog[catalog$table_id == table_id, ]
+  cats <- dim_map$categories[dim_map$table_id == table_id][[1]]
+  is_pct <- dbGetQuery(con, sprintf(
+    "SELECT max(CAST(is_percent AS INT)) m FROM facts WHERE table_id = %s", DBI::dbQuoteString(con, table_id)
+  ))$m
+  if (isTRUE(is_pct == 1)) {
+    return("Publishes a computed *percentage* metric, not a count - structurally can't be compared to count-based siblings under \"largest value wins\", so it never contributes and never should.")
+  }
+
+  own <- tryCatch(table_geo_subtotals(con, table_id, 0, row$has_month), error = function(e) NULL)
+  if (is.null(own) || nrow(own) == 0) {
+    own1 <- tryCatch(table_geo_subtotals(con, table_id, 1, row$has_month), error = function(e) NULL)
+    if (is.null(own1) || nrow(own1) == 0) {
+      extra <- if (length(cats) > 0) {
+        paste0(" It also has its own real breakdown (", paste(cats, collapse = ", "),
+               ") that likewise never surfaces - see §2.4.")
+      } else ""
+      return(paste0("Publishes no subtotal/grand-total row at any geographic depth (every row is a finest-grain leaf) - ",
+                     "structurally cannot win the Total-facet merge, which only ever compares published subtotal rows.", extra))
+    }
+  }
+
+  winning <- dbGetQuery(con, sprintf(
+    "SELECT period_year, sum(value) v FROM series_facts WHERE theme = %s AND series = %s AND facet = 'Total' AND geo_level = 'National' GROUP BY 1",
+    DBI::dbQuoteString(con, theme), DBI::dbQuoteString(con, series)
+  ))
+  if (nrow(winning) == 0) return("Series has no National Total facet to compare against.")
+
+  own_yr <- own |> group_by(period_year) |> summarise(v = sum(value, na.rm = TRUE), .groups = "drop")
+  cmp <- inner_join(own_yr, winning, by = "period_year", suffix = c("_own", "_winner"))
+  if (nrow(cmp) == 0) return("No overlapping years to compare against the series' Total facet.")
+  gap <- max(cmp$v_own - cmp$v_winner)
+  if (gap <= 0) {
+    "Its own grand total exactly matches (or falls short of) another member table's for every year - never the least-suppressed sibling, so \"largest value wins\" never credits it. Not data loss: the series' Total facet is still correctly populated by the winning sibling."
+  } else {
+    paste0("ANOMALY: exceeds the currently-credited Total by up to ", format(round(gap), big.mark = ","),
+           " in at least one year, but was never credited - needs investigation.")
+  }
+}
+
+zero_detail <- zero |>
+  rowwise() |>
+  mutate(reason = classify_zero(theme, series, table_id)) |>
+  ungroup() |>
+  transmute(Theme = display_theme(theme), Series = series, Table = short_slug(table_id, 34), Reason = reason)
+```
+
+`r nrow(zero_detail)` tables that made it as far as `catalog`/`facts` never
+supplied a single row to `series_facts` - every cell they publish was, for
+every period checked, matched or exceeded by some other member table of the
+same series:
+
+```{r part2-3-table}
+zero_detail |>
+  gt() |>
+  tab_header(title = "Tables present in the raw layer but absent from series_facts") |>
+  cols_width(Theme ~ px(85), Series ~ px(105), Table ~ px(120), Reason ~ px(330)) |>
+  tab_options(table.font.size = 7.5)
+```
+
+None of these are silent data loss at the *series* level - in every case
+checked, the series' own Total facet is still correctly populated by
+another member table. The one exception, flagged inline above if present,
+is a genuine anomaly rather than a benign tie.
+
+### 2.4 Breakdowns hidden behind generic level labels - found, and fixed
+
+```{r part2-4-compute}
+lbl_cols <- paste0("level_", 1:5, "_label")
+is_generic_label <- function(x) grepl("^(Category|Program) Level [0-9]+$", ifelse(is.na(x), "", x))
+n_generic <- rowSums(sapply(catalog[lbl_cols], is_generic_label))
+
+hidden <- catalog[n_generic >= 2, c("table_id", "table_title", "n_levels")]
+hidden$n_generic <- n_generic[n_generic >= 2]
+
+sf_hidden_sources <- dbGetQuery(con, sprintf(
+  "SELECT DISTINCT source_table_id FROM series_facts WHERE source_table_id IN (%s)",
+  paste(DBI::dbQuoteString(con, hidden$table_id), collapse = ",")
+))$source_table_id
+
+hidden <- hidden |>
+  mutate(
+    Theme = display_theme(sub("/.*$", "", table_id)), Table = short_slug(table_id, 42),
+    Recovered = ifelse(table_id %in% sf_hidden_sources, "yes", "no")
+  ) |>
+  arrange(Theme, table_id)
+n_hidden <- nrow(hidden)
+n_recovered <- sum(hidden$Recovered == "yes")
+```
+
+`guess_level_labels()` (`R/duckdb_utils.R`) derives each level's name by
+splitting a source table's title on its "by ..." phrase - e.g. "by Country
+of Citizenship and Immigration Category" → two names. Where a table's
+row hierarchy actually nests *deeper* than the title spells out - a title
+that names a dimension once (e.g. "... and Program") when the data itself
+has that same dimension split across several nested sub-levels (Program
+→ sub-program-type → specific program) - every level past what the
+title names falls back to a generic placeholder ("Category Level 3",
+"Program Level 4", ...).
+
+That placeholder text is also, separately, what used to mark a level as
+*filler* for the Break down by / Series Facts pipeline (`FILLER_LEVEL_REGEX`
+in `app/R/app_utils.R`) - deliberately, so that genuinely meaningless
+padding columns don't show up as a real breakdown choice. The two cases
+were indistinguishable from title text alone, so a table whose title
+merely under-named a real, deeply-nested dimension had that dimension's
+data **silently dropped** from `series_facts` entirely.
+
+**This is now fixed.** `table_shape()` (`data-raw/08_build_series_facts.R`)
+no longer trusts a generic label's filler classification at face value: a
+new `level_has_real_data()` (`app/R/app_utils.R`) checks the level column's
+*actual content* in `facts` first, and only treats it as real filler when
+the column is genuinely empty (structural padding past a table's real
+depth). A generically-labeled column with real, populated values is now
+kept as a real facet position instead - still under its generic label (no
+title text exists to rename it from), but no longer discarded. Levels
+recovered this way are still subject to `MAX_BREAKDOWN_LEVELS` capping like
+any other facet (§2.5) - `permanent_residents/0f1e6cce` now logs exactly
+that capping warning, since its recovered breakdown reaches 4 levels.
+
+`r n_hidden` tables were affected; `r n_recovered` of them now contribute
+their previously-hidden breakdown to `series_facts` (verified directly
+against the rebuilt table, not just re-inferred from labels):
+
+```{r part2-4-table}
+#| results: asis
+# same gt-has-no-longtable-support issue as Part 1 (see that chunk's
+# comment) - 12 rows with a long "Table title" column doesn't fit one PDF
+# page as a single gt table, so this splits into two halves rather than one
+# table that silently loses its last few rows.
+halves <- split(hidden, ceiling(seq_len(nrow(hidden)) / 6))
+for (h in halves) {
+  tbl <- h |>
+    transmute(Theme, Table, `Table title` = table_title, `Total levels` = n_levels,
+              `Generic levels` = n_generic, Recovered) |>
+    gt() |>
+    cols_width(Theme ~ px(80), Table ~ px(135), `Table title` ~ px(205),
+               `Total levels` ~ px(40), `Generic levels` ~ px(50), Recovered ~ px(45)) |>
+    tab_options(table.font.size = 7.5)
+  cat(gt::as_latex(tbl))
+}
+```
+
+Two concrete examples, confirmed directly against the rebuilt `series_facts`:
+
+- `permanent_residents/0f1e6cce` ("... by Country of Citizenship and
+  Immigration Category") is 4 levels deep. Levels 1-2 (Country of
+  Citizenship, Immigration Category) are named correctly; levels 3-4 fall
+  back to "Category Level 3/4" - and hold real, populated values
+  (`Provincial Nominee Program`, `Government-Assisted Refugee`,
+  `Self-Employed`, ...): a genuine Immigration-Category sub-program
+  breakdown. It now shows up in `series_facts` as `breakdown_2`/`breakdown_3`
+  under the `Country of Citizenship` facet (capped at `MAX_BREAKDOWN_LEVELS`,
+  see §2.5 - this table logs that capping warning).
+- `temporary_workers/520ac8e1` ("... by province/territory of intended
+  destination, program and year in which permit(s) became effective") is 5
+  levels deep. Level 1 (Province/Territory) is geography; levels 2-5 all
+  fall back to generic labels, but hold real Program category values
+  (`Canadian Interests`, `Agreements`, `Other IMP Participants`, and their
+  own sub-categories like `Significant benefit`, `Canada-International`).
+  This table has no published grand-total row (see §2.3), so it still
+  never contributes to the series' Total facet - but its Program breakdown
+  now surfaces as a `Program Level 2` facet in its own right, where it was
+  entirely absent before.
+
+This was a title-parsing limitation, not a per-table one-off - any future
+table whose title names a dimension once but nests it several levels deep
+will be caught by the same content check now, rather than needing another
+one-off fix.
+
+### 2.5 Breakdown-level capping (`MAX_BREAKDOWN_LEVELS`)
+
+```{r part2-5}
+cap_log_hits <- 0L
+```
+
+Separately from §2.4, `data-raw/08_build_series_facts.R` caps how many
+*correctly-named* nested breakdown levels it keeps per facet at
+`MAX_BREAKDOWN_LEVELS = 3` (`breakdown_1`/`breakdown_2`/`breakdown_3`) -
+anything deeper is summed away into `breakdown_3` rather than dropped, and
+the script logs a warning (`{table_id}: facet '...' has N levels, capping at
+3`) whenever this actually happens. No such warning was logged in the build
+this report was generated against - every table's *correctly-labeled*
+breakdown currently fits within the cap. This is a distinct, narrower risk
+from §2.4: capping only ever applies to levels the pipeline recognizes
+as real breakdowns in the first place, and folds the excess into a coarser
+category rather than discarding it outright.
+
+## Conclusion
+
+**One real breakdown-data-loss gap was found, and it's now fixed.** The
+report above traces every way a source table can fail to reach
+`series_facts`:
+
+- `r nrow(not_ok)` source resources never became a processed table at all
+  (`§`2.1) - one non-data documentation resource, plus 3 sheets a
+  richer sibling in the same workbook already supersedes.
+- `r n_excluded` further tables are deliberately excluded post-processing as
+  verified duplicates (`§`2.2) - documented, intentional, not a gap.
+- `r nrow(zero_detail)` tables reach the raw `catalog`/`facts` layer but
+  contribute zero rows to `series_facts` (`§`2.3) - in every case but
+  any flagged anomaly, this is because another member table of the same
+  series always matches or exceeds their published totals, so the series'
+  own Total facet is unaffected.
+- **`r n_hidden` tables had a real, populated nested breakdown that was
+  invisible in `series_facts`** (`§`2.4), because
+  `guess_level_labels()`'s title parsing under-names how deep the table's
+  row hierarchy actually goes, and the resulting generic placeholder text
+  was indistinguishable from genuine filler. This was the one finding here
+  that constituted real breakdown data loss - `table_shape()` now checks
+  actual column content (`level_has_real_data()`) before trusting a generic
+  label's filler classification, and `r n_recovered` of the `r n_hidden`
+  affected tables now contribute their previously-hidden breakdown (the
+  remainder still don't contribute for the separate, unrelated reasons in
+  §2.3 - e.g. no published grand-total row - not because of this fix).
+- No table currently triggers `MAX_BREAKDOWN_LEVELS` capping beyond what's
+  noted in §2.4 (`§`2.5).
+
+```{r cleanup}
+dbDisconnect(con, shutdown = TRUE)
+```

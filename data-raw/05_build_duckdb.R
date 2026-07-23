@@ -105,6 +105,17 @@ results <- purrr::compact(results)
 # "Percentage of French Speaking..." tables) and must stay independently
 # selectable - see the Shiny app's derive_series_label()/
 # build_theme_dimension_map() (app/R/app_utils.R).
+#
+# One recurring genuine-duplicate pattern: a source workbook's *sheet* that
+# offers no dimension a richer sibling sheet doesn't already have (e.g. a
+# CMA-only sheet alongside that same workbook's Province x CMA sheet) is
+# redundant, not a distinct Series - its values are just that richer
+# sibling's marginal aggregated over the extra dimension, confirmed via
+# facts-table comparison, not assumed from title similarity. This differs
+# from a sheet that offers a dimension no sibling has (e.g. the one sheet
+# in a family with an actual Province breakdown) - that one is kept even if
+# its aggregate totals drift from siblings due to heavier suppression at
+# its finer grain.
 EXCLUDED_DUPLICATE_TABLE_IDS <- c(
   # superseded by study_permit_holders/d3702eb4 (same PT+Study Level
   # series, 2015-2026 vs this one's narrower 2015-2022)
@@ -120,7 +131,51 @@ EXCLUDED_DUPLICATE_TABLE_IDS <- c(
   "asylum_claimants/ec417b64__canada_asylum_claimants_by_province_territory_of_claim_gende",
   # superseded by permanent_residents/81021dfd (identical CMA+PT
   # coverage, more detail retained)
-  "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma"
+  "permanent_residents/4665647e__canada_permanent_residents_by_province_territory_and_cma",
+  # superseded by temporary_workers/cb381f64 (identical PT-level monthly
+  # values year by year; cb381f64 additionally retains published
+  # quarterly/other-period rows this one lacks) - found via the
+  # app/data/label_overrides.xlsx "Duplicate" review column
+  "temporary_workers/f294343d__canada_work_permit_holders_for_humanitarian_and_compassionat",
+  # superseded by permanent_residents/1a8171dc (same PT+CD+CSD series,
+  # yearly totals match within <0.1%; 1a8171dc has richer period-type
+  # coverage) - found via the label_overrides.xlsx "Duplicate" review
+  "permanent_residents/04db757d__canada_admissions_of_permanent_residents_by_province_territo",
+  # superseded by permanent_residents/0f1e6cce (this table's citizenship-
+  # only totals match 0f1e6cce's citizenship-only marginal exactly, row
+  # for row - 0f1e6cce additionally has the Immigration Category
+  # breakdown this one lacks) - found via the label_overrides.xlsx
+  # "Duplicate" review column
+  "permanent_residents/d1c1f4f3__canada_permanent_residents_by_country_of_citizenship",
+  # French-Speaking PR ex-QC by P/T and CMA workbook: this CMA-only sheet's
+  # values are an exact marginal of pr_pt_cma's own CMA totals (verified
+  # per-CMA, per-year) - adds no dimension pr_pt_cma lacks
+  "permanent_residents/d034c26c__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_cma",
+  # French-Speaking PR ex-QC by P/T and Age Group workbook: this P/T-only
+  # sheet's values match pr_pt_age's own P/T marginal within normal
+  # suppression tolerance (~1-2%) - adds no dimension pr_pt_age lacks
+  "permanent_residents/2bd7ddf5__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt",
+  # same workbook's Age-only sheet: matches pr_pt_age's own Age marginal
+  # within suppression tolerance (largest gap in the smallest age band,
+  # where suppression bites hardest) - adds no dimension pr_pt_age lacks
+  "permanent_residents/2bd7ddf5__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_age",
+  # French-Speaking PR ex-QC by P/T and Gender workbook: this Gender-only
+  # sheet matches pr_pt_gender's own Gender marginal within suppression
+  # tolerance (~1%) - adds no dimension pr_pt_gender lacks
+  "permanent_residents/f257263f__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_gender",
+  # French-Speaking PR ex-QC by P/T and Immigration Category workbook: this
+  # 2-level sheet's values are an EXACT marginal of the sibling pr_immcat
+  # (3-level) sheet - superseded by pr_immcat, which is kept because it's
+  # the only non-geo sheet in this family with the finest category
+  # sub-breakdown and (being shallower than pr_pt_immcat, the one sheet
+  # with an actual Province dimension) less compounded small-cell
+  # suppression than aggregating pr_pt_immcat down to category level would
+  # give
+  "permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_immcat_g",
+  # same workbook's 1-level (Immigration Category only) sheet - EXACT
+  # marginal match of both pr_immcat_g and pr_immcat, superseded by
+  # pr_immcat for the same reason as pr_immcat_g above
+  "permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_immcat_m"
 )
 results <- purrr::keep(results, function(r) !(r$catalog_row$table_id %in% EXCLUDED_DUPLICATE_TABLE_IDS))
 
