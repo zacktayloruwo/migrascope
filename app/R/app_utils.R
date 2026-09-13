@@ -211,6 +211,19 @@ MAX_BREAKDOWN_LEVELS <- 3
 #' rollup (and, for stock tables, "latest month in period") happens later,
 #' the same way it already does for any other entity-grouped series (see
 #' aggregate_series()).
+#'
+#' A geo rank's own row is only ever marked `is_row_subtotal` when
+#' something narrower is nested beneath it *within this same table* (a
+#' province row is a subtotal because CD/CSD sit under it; a CD row is a
+#' subtotal only when this table also goes on to CSD). CMA and CSD never
+#' have a finer census geography nested under them, so whenever one of
+#' them is a table's own deepest published level, its rows are ordinary
+#' leaf facts (`is_row_subtotal == FALSE`), not subtotals of anything -
+#' the `has_deeper` branch below reads those leaf rows directly as this
+#' level's own totals instead. Only taken when nothing at all sits deeper
+#' for this table (checked directly, not inferred from the geo rank
+#' itself), so a level that's merely missing its subtotal rows for some
+#' other, genuine data reason isn't silently reinterpreted this way.
 table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month) {
   period_type_filter <- if (isTRUE(has_month)) "month" else "year"
   row_level_needed <- max(geo_level_idx, 1)
@@ -219,7 +232,6 @@ table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month) {
   base <- dplyr::tbl(con, "facts") |>
     dplyr::filter(
       .data$table_id == !!table_id,
-      .data$is_row_subtotal == TRUE,
       .data$row_level == !!row_level_needed,
       .data$period_type == !!period_type_filter
     )
@@ -229,9 +241,19 @@ table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month) {
   # case, or it would double up as an extra bogus "place" alongside every
   # real province/CMA/etc. subtotal
   base <- if (geo_level_idx == 0) {
-    base |> dplyr::filter(is.na(.data$level_1))
+    base |> dplyr::filter(.data$is_row_subtotal == TRUE, is.na(.data$level_1))
   } else {
-    base |> dplyr::filter(!is.na(.data$level_1))
+    base <- base |> dplyr::filter(!is.na(.data$level_1))
+    subtotal_rows <- base |> dplyr::filter(.data$is_row_subtotal == TRUE)
+    n_subtotal <- subtotal_rows |> dplyr::count() |> dplyr::pull(.data$n)
+    if (n_subtotal > 0) {
+      subtotal_rows
+    } else {
+      has_deeper <- dplyr::tbl(con, "facts") |>
+        dplyr::filter(.data$table_id == !!table_id, .data$row_level > !!row_level_needed) |>
+        dplyr::count() |> dplyr::pull(.data$n) > 0
+      if (has_deeper) subtotal_rows else base |> dplyr::filter(.data$is_row_subtotal == FALSE)
+    }
   }
 
   d <- base |>
@@ -1036,6 +1058,23 @@ has_category_translations <- function(con) {
 #' `category_translations` table doesn't exist yet.
 translate_vec <- function(con, x, context, lang, table_id = NULL) {
   if (!identical(lang, "fr") || length(x) == 0) return(x)
+
+  # series/facet display names come from a table's own *title* text, which
+  # has no automatic French-derivation step (unlike breakdown_1/2/3 values,
+  # bulk-harvested from source-data row content) - SERIES_FACET_LABELS_FR
+  # (app/R/i18n.R) is a small, hand-maintained lookup for exactly these two
+  # contexts, checked first; anything it doesn't cover still falls through
+  # to category_translations below (harmless no-op there for series/facet
+  # today, but keeps the door open if that ever gets an auto source).
+  if (context %in% c("series", "facet")) {
+    hit <- unname(SERIES_FACET_LABELS_FR[x])
+    covered <- !is.na(hit)
+    if (all(covered)) return(hit)
+    x_remaining <- x
+    x_remaining[covered] <- hit[covered]
+    x <- x_remaining
+  }
+
   if (!has_category_translations(con)) return(x)
 
   lookup <- dplyr::tbl(con, "category_translations") |>

@@ -3,6 +3,7 @@
 .Rproj.user/
 .DS_Store
 data-raw/downloads/
+data-raw/downloads_fr/
 data/processed/
 app/data/immigration.duckdb
 app/data/immigration.duckdb.wal

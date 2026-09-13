@@ -94,6 +94,21 @@ pairs_expanded <- if (nrow(pairs) > 0) {
                   table_id = character(), context = character())
 }
 
+# Fold in pivot-Excel/IRB pairs harvested separately by
+# data-raw/09_harvest_fr_translations.R (already written with a
+# context column of its own, breakdown_1/2/3/facet, since that script's
+# tables can also seed a facet-name translation from level_1's label) -
+# optional input, this script still runs standalone against just the
+# flat-CSV data if the harvest hasn't been run (or re-run) yet.
+PIVOT_IRB_PAIRS_PATH <- "data-raw/fr_harvest_pivot_irb_pairs.csv"
+if (file.exists(PIVOT_IRB_PAIRS_PATH)) {
+  pivot_irb_pairs <- readr::read_csv(PIVOT_IRB_PAIRS_PATH, show_col_types = FALSE)
+  cli::cli_alert_info("Folding in {nrow(pivot_irb_pairs)} pivot/IRB pairs from {PIVOT_IRB_PAIRS_PATH}")
+  pairs_expanded <- dplyr::bind_rows(pairs_expanded, pivot_irb_pairs)
+} else {
+  cli::cli_alert_info("{PIVOT_IRB_PAIRS_PATH} not found - run data-raw/09_harvest_fr_translations.R first for pivot Excel/IRB coverage")
+}
+
 # Every harvested pair is initially scoped to the table_id it came from -
 # but translate_vec() (app/R/app_utils.R) is mostly called WITHOUT a
 # table_id (a displayed series/facet/breakdown value in the app can come

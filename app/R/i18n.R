@@ -7,6 +7,71 @@
 # names) is translated separately via `category_translations`
 # (data-raw/09_build_translations.R), looked up at render time by
 # translate_vec() in R/app_utils.R.
+#' Hand-translated series/facet display names - unlike breakdown_1/2/3
+#' category *values* (harvested in bulk from source-data row content via
+#' data-raw/09_build_translations.R / 09_harvest_fr_translations.R),
+#' series/facet names come from a table's own *title* text, which this
+#' project has no automatic French-derivation step for (mirroring
+#' derive_series_label()'s English title-parsing would be a much larger
+#' undertaking for ~43 stable, small-vocabulary terms). Same precedent as
+#' DATASET_LABELS_FR in app.R: a small, directly hand-maintained lookup
+#' rather than forcing a handful of one-off terms through the auto/custom
+#' pipeline built for bulk harvested data. Checked first by translate_vec()
+#' (app/R/app_utils.R) for context %in% c("series", "facet"), before
+#' falling back to the category_translations table.
+SERIES_FACET_LABELS_FR <- c(
+  # series
+  "Adoptions via PR" = "Adoptions par la résidence permanente",
+  "All admissions" = "Toutes les admissions",
+  "All claims" = "Toutes les demandes",
+  "All claims (last known address)" = "Toutes les demandes (dernière adresse connue)",
+  "All permits (at December 31)" = "Tous les permis (au 31 décembre)",
+  "All permits (Year became effective)" = "Tous les permis (année d'entrée en vigueur)",
+  "Anglophone admissions within Québec" = "Admissions anglophones au Québec",
+  "Francophone admissions outside Québec" = "Admissions francophones hors Québec",
+  "Permits for humanitarian and compassionate purposes (Year became effective)" =
+    "Permis pour motifs d'ordre humanitaire (année d'entrée en vigueur)",
+  "Permits for work purposes only (at December 31)" = "Permis à des fins de travail seulement (au 31 décembre)",
+  "Permits under post-grad employment" = "Permis dans le cadre de l'emploi postdiplôme",
+  "Permits under post-grad employment (at December 31)" =
+    "Permis dans le cadre de l'emploi postdiplôme (au 31 décembre)",
+  "Permits under post-grad employment (Year became effective)" =
+    "Permis dans le cadre de l'emploi postdiplôme (année d'entrée en vigueur)",
+  "Post-Secondary (Year became effective)" = "Études postsecondaires (année d'entrée en vigueur)",
+  "Prior IMP, under post-grad" = "Antérieurement PMI, emploi postdiplôme",
+  "Prior IMP, work purposes only" = "Antérieurement PMI, fins de travail seulement",
+  "Prior study permit" = "Antérieurement titulaire d'un permis d'études",
+  "Prior TFWP" = "Antérieurement PTET",
+  "Province of Claimant" = "Province du demandeur",
+  "Refugee Protection Division RPD Decisions" = "Décisions de la Section de la protection des réfugiés (SPR)",
+  "Top 25 ranking by citizenship (annual)" = "Classement des 25 principales nationalités (annuel)",
+  "Top 25 ranking by citizenship (claim year)" = "Classement des 25 principales nationalités (année de la demande)",
+  "Top 25 ranking by citizenship (monthly)" = "Classement des 25 principales nationalités (mensuel)",
+  "Top 25 ranking by citizenship (most recent complete month)" =
+    "Classement des 25 principales nationalités (dernier mois complet)",
+  "Top 25 ranking by citizenship (most recent complete year)" =
+    "Classement des 25 principales nationalités (dernière année complète)",
+  # facet ("Outcome" shared between series and facet vocab - same word, kept once)
+  "Age" = "Âge",
+  "Age Group" = "Groupe d'âge",
+  "Citizenship" = "Citoyenneté",
+  "Claim Office Type" = "Type de bureau de demande",
+  "Country of Citizenship" = "Pays de citoyenneté",
+  "Country of Persecution" = "Pays de persécution",
+  "DLI Name" = "Nom de l'ÉED",
+  "Gender" = "Genre",
+  "Immigration Category" = "Catégorie d'immigration",
+  "Intended Occupation (4-Digit NOC 2011)" = "Profession prévue (CNP 2011 à 4 chiffres)",
+  "Intended Occupation (NOC 2011)" = "Profession prévue (CNP 2011)",
+  "Outcome" = "Résultat",
+  "Program" = "Programme",
+  "Study Level" = "Niveau d'études",
+  "Top 25 Countries of Citizenship in the Most Recent Complete Year" =
+    "25 principaux pays de citoyenneté de la dernière année complète",
+  "Top 25 Countries of Citizenship in the Most Recent Month" = "25 principaux pays de citoyenneté du dernier mois",
+  "Total" = "Total"
+)
+
 STRINGS <- list(
   app_title          = c(en = "Canadian Immigration Statistics Visualizer",
                           fr = "Visualiseur de statistiques sur l'immigration canadienne"),
@@ -28,12 +93,16 @@ STRINGS <- list(
                           fr = "Nombre maximal de catégories affichées (le reste groupé sous « Autre »)"),
 
   none_choice        = c(en = "None",                   fr = "Aucun"),
+  geo_not_available  = c(en = "Not available for this series", fr = "Non disponible pour cette série"),
   all_choice         = c(en = "All",                    fr = "Tous"),
   monthly            = c(en = "Monthly",                fr = "Mensuel"),
   quarterly          = c(en = "Quarterly",               fr = "Trimestriel"),
   annual             = c(en = "Annual",                  fr = "Annuel"),
   national           = c(en = "National",                fr = "National"),
   province_territory = c(en = "Province/Territory",     fr = "Province/Territoire"),
+  cma                = c(en = "CMA",                     fr = "RMR"),
+  cd                 = c(en = "CD",                      fr = "DR"),
+  csd                = c(en = "CSD",                     fr = "SDR"),
   absolute_values    = c(en = "Absolute Values",         fr = "Valeurs absolues"),
   percentage_total   = c(en = "Percentage of Total",     fr = "Pourcentage du total"),
 

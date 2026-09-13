@@ -192,11 +192,20 @@ ui <- page_sidebar(
   # string - bslib infers the browser tab title by extracting all text
   # from it otherwise, which would pull in the button labels too.
   window_title = "Canadian Immigration Statistics Visualizer",
+  # heading_font matches app/www/custom.css's existing "Noto Sans"
+  # font-family rules for h4/h5/h6/the navbar title (those were previously
+  # a no-op fallback to generic `serif` since nothing actually loaded Noto
+  # Sans from Google Fonts until now).
   theme = bs_theme(version = 5, primary = "#0b4f6c",
-                    base_font = font_google("Roboto"),
-                    heading_font = font_google("Roboto")),
+                    base_font = font_google("Noto Sans"),
+                    heading_font = font_google("Noto Sans")),
   tags$head(
-    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+    # A cache-busting query string keyed to the file's own mtime - without
+    # one, a browser that already cached an older custom.css (e.g. from a
+    # previous deploy) can keep serving those stale styles indefinitely
+    # after a redeploy changes the file's content but not its URL.
+    tags$link(rel = "stylesheet", type = "text/css",
+               href = paste0("custom.css?v=", as.integer(file.info("www/custom.css")$mtime))),
     # Highlights whichever of the two nav buttons matches the current
     # main_view panel by swapping its Bootstrap variant (outline <->
     # solid) - done via a tiny custom message rather than re-rendering
@@ -217,21 +226,53 @@ ui <- page_sidebar(
       // whichever radio options in a native Shiny radioButtons group aren't
       // valid right now - the input keeps its normal Shiny wiring (clicking
       // an enabled option still just works via the input's own change
-      // event), this only ever removes options from being choosable.
-      function setRadioAvailability(inputName, available) {
+      // event), this only ever removes options from being choosable. A
+      // disabled native radio gives no feedback at all when clicked (no
+      // event, no visual change), which reads as nothing happens rather
+      // than this option isn't available - a title tooltip on the label
+      // makes the reason visible on hover instead of a silent no-op.
+      function setRadioAvailability(inputName, available, disabledTitle) {
         document.querySelectorAll('input[name=\"' + inputName + '\"]').forEach(function(input) {
           var ok = available.indexOf(input.value) !== -1;
           input.disabled = !ok;
           var label = input.closest('label') || input.parentElement;
-          if (label) label.classList.toggle('text-muted', !ok);
+          if (label) {
+            label.classList.toggle('text-muted', !ok);
+            if (!ok && disabledTitle) {
+              label.title = disabledTitle;
+            } else {
+              label.removeAttribute('title');
+            }
+          }
         });
       }
       // Which Geographic Aggregation ranks are available for the current
       // series - the server recomputes this per series switch (see
       // build_series_summary() in R/app_utils.R and the input$series
       // observer in app.R).
-      Shiny.addCustomMessageHandler('setGeoAvailability', function(available) {
-        setRadioAvailability('geo_level', available);
+      Shiny.addCustomMessageHandler('setGeoAvailability', function(msg) {
+        setRadioAvailability('geo_level', msg.available, msg.disabledTitle);
+      });
+      // Retargets a radioButtons group's visible option text in place
+      // (the <span> Shiny renders next to each <input>), without touching
+      // the input elements themselves - unlike updateRadioButtons(), which
+      // rebuilds the whole group's DOM from scratch and would silently wipe
+      // out the disabled/title state setRadioAvailability just applied (the
+      // two custom messages and the updateRadioButtons() call all land in
+      // the same Shiny message batch, and updateRadioButtons's own DOM
+      // rebuild isn't guaranteed to run before this handler). Used by the
+      // lang() switch below for geo_level/display_as, whose *values* never
+      // change - only their displayed label text does.
+      function setRadioLabels(inputName, labels) {
+        document.querySelectorAll('input[name=\"' + inputName + '\"]').forEach(function(input) {
+          if (!Object.prototype.hasOwnProperty.call(labels, input.value)) return;
+          var label = input.closest('label') || input.parentElement;
+          var span = label && label.querySelector('span');
+          if (span) span.textContent = labels[input.value];
+        });
+      }
+      Shiny.addCustomMessageHandler('setRadioLabels', function(msg) {
+        setRadioLabels(msg.inputName, msg.labels);
       });
       // Percentage of Total is meaningless (always exactly 100%) whenever
       // the resolved view is a single unbroken-down bar - the server
@@ -300,9 +341,9 @@ ui <- page_sidebar(
     radioButtons("geo_level", NULL, choices = c(
       "National" = "national",
       "Province/Territory" = "PT",
-      "CMA" = "CMA",
-      "CD" = "CD",
-      "CSD" = "CSD"
+      stats::setNames("CMA", tr("cma")),
+      stats::setNames("CD", tr("cd")),
+      stats::setNames("CSD", tr("csd"))
     ), selected = "national"),
     h6(tr("display_as_label"), id = "lbl_display_as"),
     radioButtons("display_as", NULL,
@@ -415,14 +456,32 @@ server <- function(input, output, session) {
       updateSelectInput(session, "cat_level", choices = stats::setNames(opts, display),
                          selected = input$cat_level)
     }
-    updateRadioButtons(session, "geo_level", choices = c(
-      stats::setNames("national", tr("national", l)),
-      stats::setNames("PT", tr("province_territory", l)),
-      "CMA" = "CMA", "CD" = "CD", "CSD" = "CSD"
-    ), selected = input$geo_level)
-    updateRadioButtons(session, "display_as", choices = stats::setNames(
-      c("absolute", "percent"), c(tr("absolute_values", l), tr("percentage_total", l))
-    ), selected = input$display_as)
+    # geo_level/display_as values never change on a language switch - only
+    # their displayed text does - so retarget label text in place
+    # (setRadioLabels) rather than updateRadioButtons(), which would rebuild
+    # the group's DOM and wipe the disabled/title state setGeoAvailability
+    # applied for the current series (see setRadioLabels' JS comment above).
+    session$sendCustomMessage("setRadioLabels", list(
+      inputName = "geo_level",
+      labels = list(national = tr("national", l), PT = tr("province_territory", l),
+                    CMA = tr("cma", l), CD = tr("cd", l), CSD = tr("csd", l))
+    ))
+    # setRadioLabels above only retargets label text, leaving disabled/title
+    # state untouched - but the disabled tooltip text itself is language-
+    # dependent, so re-send it here (harmless no-op on already-enabled
+    # options; setRadioAvailability only ever sets/clears `title`).
+    if (!is.null(input$series)) {
+      rows <- series_rows()
+      available_ranks <- setdiff(unique(rows$geo_level), "National")
+      session$sendCustomMessage("setGeoAvailability", list(
+        available = c("national", available_ranks),
+        disabledTitle = tr("geo_not_available", l)
+      ))
+    }
+    session$sendCustomMessage("setRadioLabels", list(
+      inputName = "display_as",
+      labels = list(absolute = tr("absolute_values", l), percent = tr("percentage_total", l))
+    ))
     # Granularity's *value* is the literal English word itself (unlike
     # geo_level/display_as, which already separate a stable value from its
     # label) - build_series_plot_data()/aggregate_series() check
@@ -500,7 +559,10 @@ server <- function(input, output, session) {
   observeEvent(input$series, {
     rows <- series_rows()
     available_ranks <- setdiff(unique(rows$geo_level), "National")
-    session$sendCustomMessage("setGeoAvailability", c("national", available_ranks))
+    session$sendCustomMessage("setGeoAvailability", list(
+      available = c("national", available_ranks),
+      disabledTitle = tr("geo_not_available", lang())
+    ))
     updateRadioButtons(session, "geo_level", selected = "national")
 
     # geo_level defaults to National on every series switch, so Break down
@@ -633,6 +695,16 @@ server <- function(input, output, session) {
       updateSelectInput(session, "drill_1",
                          choices = c(stats::setNames("none", tr("none_choice", lang())), stats::setNames(vals, display)),
                          selected = selected)
+    } else if (!is.null(input$drill_1) && !identical(input$drill_1, "none")) {
+      # drill_1's own conditionalPanel just hides the selector when not
+      # needed (e.g. Break down by reset to None, or a specific geo_unit
+      # narrowed the facet away) - Shiny inputs keep their last value
+      # regardless of visibility, so without this reset a stale drill_1
+      # (e.g. "India" from a previous facet) silently keeps filtering
+      # build_series_plot_data()'s query (app.R below, ~line 822) even
+      # though the control is gone, producing a false "No data" instead of
+      # the Total-level data the visible controls promise.
+      updateSelectInput(session, "drill_1", choices = c("None" = "none"), selected = "none")
     }
   })
 
@@ -657,6 +729,10 @@ server <- function(input, output, session) {
       updateSelectInput(session, "drill_2",
                          choices = c(stats::setNames("none", tr("none_choice", lang())), stats::setNames(vals, display)),
                          selected = selected)
+    } else if (!is.null(input$drill_2) && !identical(input$drill_2, "none")) {
+      # Same stale-value reset as drill_1's observer above, for the same
+      # reason - drill_2 must not keep filtering once hidden/not applicable.
+      updateSelectInput(session, "drill_2", choices = c("None" = "none"), selected = "none")
     }
   })
 
