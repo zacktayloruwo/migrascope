@@ -102,11 +102,7 @@ dim_map <- build_theme_dimension_map(catalog)
 #' this override or it would wrongly resurface as a facet (as it did before
 #' this distinction existed - see FILLER_LEVEL_REGEX's own comment).
 table_shape <- function(cl, con, table_id) {
-  is_generic_fallback <- grepl(GENERIC_FALLBACK_LABEL_REGEX, cl$label, ignore.case = TRUE)
-  really_filler <- cl$is_filler & !(is_generic_fallback & vapply(seq_len(nrow(cl)), function(i) {
-    if (!is_generic_fallback[i]) return(FALSE)
-    level_has_real_data(con, table_id, paste0("level_", cl$level_index[i]))
-  }, logical(1)))
+  really_filler <- really_filler_levels(cl, con, table_id)
 
   geo_positions <- which(!is.na(cl$geo_rank))
   facet_positions <- which(is.na(cl$geo_rank) & !really_filler)
@@ -149,15 +145,81 @@ prefer_finest_grain <- function(pieces) {
   })
 }
 
+#' When a merge_max() candidate set spans >=2 source tables (same facet,
+#' geo_level, is_stock) that differ in how many real breakdown levels they
+#' each publish - table_facet_leaf_rows()'s padding-collapse only removes
+#' non-informative depth *within* one table, it can't make two tables
+#' agree when one of them genuinely publishes a real sub-split the other
+#' never did at all (found via temporary_workers/520ac8e1 publishing an
+#' extra "Unknown International Mobility Program" layer under "Other IMP
+#' Participants" that temporary_workers/d5779439, a real sibling for the
+#' same "Program" facet, never breaks down further - and again one level
+#' up, in roll_up_facet_geo()'s own province-to-national rollup, once
+#' 520ac8e1's PT-level rows are summed up and compared against
+#' d5779439's already-National rows). Left alone, the deeper table's
+#' extra-depth rows and the shallower table's flatter row for the very
+#' same real category both survive merge_max()'s key match as different
+#' keys - each individually correct, but together double-counting one
+#' real total. Raggedness is per-branch, not per-table - the very same
+#' table can genuinely split "Agreements" three levels deep while leaving
+#' "Other IMP Participants" flat (see table_facet_leaf_rows()'s own
+#' padding-collapse comment) - so this checks, for each breakdown_1..N-1
+#' parent path shared by >=2 contributing tables, whether every one of
+#' those tables has *some* real data at the next level; if even one of
+#' them never goes that deep for that specific path, the next level (and
+#' everything deeper) is collapsed to NA for that path across every
+#' table, so all of them compare at the same granularity for that branch
+#' specifically before the max-merge below runs. This sacrifices a richer
+#' sibling's extra depth for that one branch once merged with a shallower
+#' one, but that's the right trade: an extra drill-down layer isn't worth
+#' a doubled total. A no-op whenever there's only one contributing table,
+#' or no breakdown columns at all (the facet="Total" merges in this
+#' script never have breakdown columns).
+roll_up_to_common_breakdown_depth <- function(combined) {
+  bcols <- intersect(paste0("breakdown_", seq_len(MAX_BREAKDOWN_LEVELS)), names(combined))
+  if (length(bcols) == 0 || !("source_table_id" %in% names(combined))) return(combined)
+  if (length(unique(combined$source_table_id)) < 2) return(combined)
+
+  branch_key <- function(x, cols) do.call(paste, c(x[cols], sep = "␟"))
+
+  for (i in length(bcols):2) {
+    parent_cols <- bcols[seq_len(i - 1)]
+    col <- bcols[i]
+    per_table_depth <- combined |>
+      group_by(across(all_of(c(parent_cols, "source_table_id")))) |>
+      summarise(has_depth = any(!is.na(.data[[col]])), .groups = "drop")
+    shallow_branches <- per_table_depth |>
+      group_by(across(all_of(parent_cols))) |>
+      summarise(all_have_depth = all(.data$has_depth), n_tables = dplyr::n(), .groups = "drop") |>
+      filter(.data$n_tables >= 2, !.data$all_have_depth) |>
+      select(all_of(parent_cols))
+    if (nrow(shallow_branches) == 0) next
+    is_shallow <- branch_key(combined, parent_cols) %in% branch_key(shallow_branches, parent_cols)
+    for (j in i:length(bcols)) combined[[bcols[j]]][is_shallow] <- NA_character_
+  }
+
+  # Nulling levels above can create duplicate rows within the same table
+  # (several deeper values collapsing onto the same shallower key) that
+  # must be summed back together before merge_max()'s own cross-table
+  # max-merge runs.
+  group_cols <- setdiff(names(combined), "value")
+  combined |>
+    group_by(across(all_of(group_cols))) |>
+    summarise(value = sum(.data$value, na.rm = TRUE), .groups = "drop")
+}
+
 #' Merge candidate rows (one data.frame per contributing table, each with a
 #' `source_table_id` column already attached) down to one row per distinct
 #' key column set, keeping the row with the largest `value` - "least
-#' suppressed sibling wins" (see this script's header comment).
+#' suppressed sibling wins" (see this script's header comment). Rolls
+#' sibling tables of differing breakdown depth to a common depth first -
+#' see roll_up_to_common_breakdown_depth().
 merge_max <- function(pieces, key_cols) {
   pieces <- pieces[vapply(pieces, function(d) !is.null(d) && nrow(d) > 0, logical(1))]
   if (length(pieces) == 0) return(NULL)
   combined <- bind_rows(pieces) |> filter(!is.na(.data$value))
   if (nrow(combined) == 0) return(NULL)
+  combined <- roll_up_to_common_breakdown_depth(combined)
   combined |>
     group_by(across(all_of(key_cols))) |>
     slice_max(order_by = .data$value, n = 1, with_ties = FALSE) |>

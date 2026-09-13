@@ -231,6 +231,15 @@ empty_row_result <- function() {
 #' total is the numerical signature of exactly this mismatch. Detected
 #' checks are relabelled "not_applicable" rather than left as false-positive
 #' anomalies.
+#'
+#' This only covers tables that publish month/quarter data in the first
+#' place - an annual-only snapshot table (e.g. "on December 31st") has no
+#' `month_to_quarter` checks to reclassify here at all (nothing to do,
+#' correctly a no-op), but is still a stock table for every other purpose
+#' (e.g. `series_facts`' stock/flow merge guard). That case is instead
+#' detected from title text, since it's the only signal available when
+#' there's no month/quarter ratio to compute - see
+#' R/duckdb_utils.R::normalize_table()'s `STOCK_TITLE_PATTERN` fallback.
 reclassify_stock_tables <- function(period_results, ratio_threshold = 2) {
   checkable <- period_results |>
     dplyr::filter(.data$check_type == "month_to_quarter", .data$status %in% c("pass", "anomaly")) |>

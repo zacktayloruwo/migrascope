@@ -264,6 +264,30 @@ level_has_real_data <- function(con, table_id, level_col) {
   length(n) > 0 && n[1] >= 1
 }
 
+#' Which of a table's `classify_level()` rows are truly filler (not real
+#' breakdown facets) - a label-only `cl$is_filler` isn't enough for a
+#' *generic-fallback* label (GENERIC_FALLBACK_LABEL_REGEX): that same text
+#' also appears whenever a table's title under-names how deep its row
+#' hierarchy actually nests (e.g. temporary_workers/520ac8e1 - see
+#' GENERIC_FALLBACK_LABEL_REGEX's own comment), so it's re-checked against
+#' real data (level_has_real_data()) before being trusted as filler. Kept
+#' as one function so this decision can't drift apart between
+#' data-raw/06_build_label_lookups.R (which decides which levels get an
+#' editable row in label_overrides.xlsx) and data-raw/08_build_series_facts.R
+#' (which decides which levels become a real, mergeable facet) - those two
+#' must agree, or a level content-overridden into a real facet by 08 has no
+#' way to ever get a human-readable label from 06's spreadsheet, and two
+#' tables' same real-world dimension can end up under two different
+#' generic-fallback label strings ("Program" vs "Program Level 2") that 08's
+#' exact-string facet grouping then never recognizes as siblings to merge.
+really_filler_levels <- function(cl, con, table_id) {
+  is_generic_fallback <- grepl(GENERIC_FALLBACK_LABEL_REGEX, cl$label, ignore.case = TRUE)
+  cl$is_filler & !(is_generic_fallback & vapply(seq_len(nrow(cl)), function(i) {
+    if (!is_generic_fallback[i]) return(FALSE)
+    level_has_real_data(con, table_id, paste0("level_", cl$level_index[i]))
+  }, logical(1)))
+}
+
 #' One table's own true leaf rows (see true_leaf_rows()), reshaped into
 #' `series_facts`'s two-part column scheme: `geo_1..geo_{length(geo_positions)}`
 #' for whatever geographic levels this table has (possibly none), and
@@ -322,6 +346,50 @@ table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_
   for (i in seq_len(3)) {
     col <- paste0("geo_", i)
     if (!col %in% names(d)) d[[col]] <- NA_character_
+  }
+
+  # A source table's own branch can terminate before the table's nominal
+  # depth without an explicit narrower row (see true_leaf_rows()'s "ragged
+  # hierarchy" comment) - but some IRCC pivot tables instead pad every
+  # branch to one uniform depth, rather than leaving a shallower branch's
+  # row genuinely shorter. That padding isn't always a literal repeat of
+  # the parent text - it can just as well be table-specific placeholder
+  # text ("Unknown", "Program not stated", ...) that differs level to
+  # level but still conveys nothing, since it's the ONLY value that branch
+  # ever takes. Left alone, that reads as a real, distinct breakdown_2/3
+  # value - which especially matters when facet-merging siblings across
+  # tables (data-raw/08_build_series_facts.R): a sibling table whose own
+  # hierarchy doesn't pad this deep has breakdown_2/3 = NA for the exact
+  # same real category, so the two tables' otherwise-identical rows fail
+  # to match on the merge key and BOTH survive, double-counting a value
+  # that's actually one cell (found via temporary_workers/520ac8e1's
+  # "Other IMP Participants" branch, padded down through "Unknown
+  # International Mobility Program" -> "Unknown" -> "Program not stated",
+  # doubling that category once merged with temporary_workers/d5779439's
+  # shallower sibling row, which stops at "Other IMP Participants" alone).
+  #
+  # Detected structurally rather than by matching specific placeholder
+  # text (different tables pad differently): for each breakdown level,
+  # from deepest to shallowest, collapse it to NA wherever it never takes
+  # more than one distinct value for its exact parent-category combination
+  # anywhere in this table - such a "split" never actually splits anything,
+  # regardless of what text fills it. A level that genuinely varies for a
+  # branch elsewhere in the table (even if only one value shows up for a
+  # specific geo/period slice) is left alone.
+  for (i in MAX_BREAKDOWN_LEVELS:2) {
+    parent_cols <- paste0("breakdown_", seq_len(i - 1))
+    col <- paste0("breakdown_", i)
+    n_children <- d |>
+      dplyr::filter(!is.na(.data[[col]])) |>
+      dplyr::distinct(dplyr::across(dplyr::all_of(c(parent_cols, col)))) |>
+      dplyr::count(dplyr::across(dplyr::all_of(parent_cols)), name = "n")
+    single_child <- n_children[n_children$n == 1, parent_cols, drop = FALSE]
+    if (nrow(single_child) == 0) next
+    branch_key <- function(x) do.call(paste, c(x[parent_cols], sep = "␟"))
+    is_pad <- !is.na(d[[col]]) & branch_key(d) %in% branch_key(single_child)
+    if (any(is_pad)) {
+      for (j in i:MAX_BREAKDOWN_LEVELS) d[[paste0("breakdown_", j)]][is_pad] <- NA_character_
+    }
   }
   d
 }
@@ -943,6 +1011,51 @@ list_series_breakdown_values <- function(con, theme, series, facet, geo_level, d
   }
   q |> dplyr::filter(!is.na(.data[[col]])) |> dplyr::distinct(.data[[col]]) |>
     dplyr::collect() |> dplyr::pull(1) |> sort()
+}
+
+#' Whether `con` has a `category_translations` table yet - populated by
+#' data-raw/09_build_translations.R (flat-CSV FR_ pairs) and
+#' data-raw/09_harvest_fr_translations.R (pivot Excel/IRB pairs), neither of
+#' which need to have run for the app to work: translate_vec() below falls
+#' back to the original English text wherever no translation row exists, so
+#' bilingual coverage can grow incrementally without an app code change.
+has_category_translations <- function(con) {
+  "category_translations" %in% DBI::dbListTables(con)
+}
+
+#' Translate a vector of series_facts display text (series/facet/breakdown
+#' category values) to French via `category_translations`, falling back to
+#' the original English text wherever no translation exists - never blank,
+#' never an error. `context` narrows the lookup to the right kind of text
+#' (e.g. "breakdown_1"); `table_id`, when given, prefers a translation scoped
+#' to that one source table (the same reason label_overrides.xlsx keys
+#' breakdown-item overrides by `(table_id, label)` rather than by label
+#' alone - the same English text can mean different things in different
+#' tables), falling back to a table-agnostic match, then to English.
+#' No-ops entirely (returns `x` unchanged) when `lang` is "en" or the
+#' `category_translations` table doesn't exist yet.
+translate_vec <- function(con, x, context, lang, table_id = NULL) {
+  if (!identical(lang, "fr") || length(x) == 0) return(x)
+  if (!has_category_translations(con)) return(x)
+
+  lookup <- dplyr::tbl(con, "category_translations") |>
+    dplyr::filter(.data$context == !!context, .data$en_text %in% !!unique(x)) |>
+    dplyr::collect()
+  if (nrow(lookup) == 0) return(x)
+
+  scoped <- if (!is.null(table_id)) {
+    lookup[!is.na(lookup$table_id) & lookup$table_id == table_id, , drop = FALSE]
+  } else {
+    lookup[0, , drop = FALSE]
+  }
+  unscoped <- lookup[is.na(lookup$table_id), , drop = FALSE]
+
+  fr_for <- function(en) {
+    hit <- scoped$fr_text[scoped$en_text == en]
+    if (length(hit) == 0) hit <- unscoped$fr_text[unscoped$en_text == en]
+    if (length(hit) == 0 || is.na(hit[1]) || !nzchar(hit[1])) en else hit[1]
+  }
+  vapply(x, fr_for, character(1), USE.NAMES = FALSE)
 }
 
 #' Pull one (theme, series, facet, geo_level) view's rows out of

@@ -58,6 +58,28 @@ clean_dimension_name <- function(x) {
 }
 
 #' Process a "flat" CSV resource (already one row per period x dimensions).
+#'
+#' Every dimension column has a parallel `FR_*` sibling carrying IRCC's own
+#' French translation of that row's category value - genuine bilingual data
+#' we'd otherwise discard entirely. The FR_ column names aren't a simple
+#' prefix-swap of their EN_ counterpart's name (e.g. `EN_PROVINCE_TERRITORY`'s
+#' sibling is `FR_PROVINCE_TERRITOIRE`, not `FR_PROVINCE_TERRITORY`), so
+#' siblings can't be matched by string similarity - they're matched by
+#' column *position* instead: verified across every real downloaded flat CSV
+#' (asylum_claimants, permanent_residents, study_permit_holders,
+#' temporary_workers) that the period FR_ columns always appear first, as a
+#' block, immediately after the period EN_ columns (`EN_YEAR, EN_QUARTER,
+#' EN_MONTH, FR_ANNEÉ, FR_TRIMESTRE, FR_MOIS, ...`), and the *dimension*
+#' FR_ columns that follow are always interleaved with their EN_
+#' counterpart in matching order (`EN_X, FR_X, EN_Y, FR_Y, ...`) - so the
+#' first `length(period_cols)` FR_ columns are period-related (dropped, since
+#' periods are already parsed into numeric period_year/month/quarter) and the
+#' remaining FR_ columns correspond 1:1, in file order, to `dim_cols`.
+#' Carried through `long` as `<dimension>__fr_label` (not pivoted into
+#' `wide`, same as `suppressed`/`is_percent`) - these seed the EN->FR
+#' translation lookup (data-raw/09_build_translations.R), not a new query
+#' key; every existing consumer of this table keeps filtering/grouping on
+#' the EN dimension columns exactly as before.
 process_flat_csv <- function(path) {
   raw <- readr::read_delim(path, delim = "\t", col_types = readr::cols(.default = "c"),
                             progress = FALSE, show_col_types = FALSE)
@@ -70,9 +92,26 @@ process_flat_csv <- function(path) {
   period_cols <- c("EN_YEAR", if (has_quarter) "EN_QUARTER", "EN_MONTH")
   dim_cols <- setdiff(en_cols, period_cols)
 
+  fr_cols_all <- grep("^FR_", names(raw), value = TRUE)
+  fr_dim_cols <- if (length(fr_cols_all) > length(period_cols)) {
+    utils::tail(fr_cols_all, -length(period_cols))
+  } else {
+    character(0)
+  }
+  has_fr <- length(fr_dim_cols) == length(dim_cols) && length(dim_cols) > 0
+  fr_label_cols <- character(0)
+  if (has_fr) {
+    fr_label_cols <- paste0(clean_dimension_name(dim_cols), "__fr_label")
+  }
+
   out <- raw |>
-    dplyr::select(dplyr::all_of(c(period_cols, dim_cols, value_col))) |>
-    dplyr::rename_with(clean_dimension_name, dplyr::all_of(dim_cols)) |>
+    dplyr::select(dplyr::all_of(c(period_cols, dim_cols,
+                                    if (has_fr) fr_dim_cols, value_col))) |>
+    dplyr::rename_with(clean_dimension_name, dplyr::all_of(dim_cols))
+  if (has_fr) {
+    out <- out |> dplyr::rename_with(~fr_label_cols, dplyr::all_of(fr_dim_cols))
+  }
+  out <- out |>
     dplyr::mutate(
       period_year = as.integer(.data$EN_YEAR),
       period_month = match(.data$EN_MONTH, month_abb_en),
@@ -95,7 +134,8 @@ process_flat_csv <- function(path) {
   wide <- long |>
     dplyr::select(-"suppressed", -"is_percent", -"period_type",
                    -"is_period_subtotal", -"is_row_subtotal",
-                   -"period_year", -"period_quarter", -"period_month") |>
+                   -"period_year", -"period_quarter", -"period_month",
+                   -dplyr::any_of(fr_label_cols)) |>
     tidyr::pivot_wider(names_from = "period_label", values_from = "value")
 
   list(long = long, wide = wide)

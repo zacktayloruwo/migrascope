@@ -18,6 +18,13 @@
 
 MAX_LEVELS <- 5
 
+# Title-text signature for point-in-time "stock" tables that publish only
+# annual rows (e.g. "on December 31st", "with a valid permit") - these have
+# no month/quarter data at all, so the ratio-based structural stock
+# detection below can never run for them; this is the only signal
+# available in that case. Kept in sync with R/validate_utils.R::reclassify_stock_tables().
+STOCK_TITLE_PATTERN <- "on December 31st|as of December 31|with a valid permit"
+
 period_meta_cols <- c("period_year", "period_quarter", "period_month", "period_type",
                        "period_label", "is_period_subtotal")
 value_cols <- c("value", "suppressed", "is_percent")
@@ -428,6 +435,11 @@ normalize_table <- function(long, table_id, dataset, table_title) {
     if (nrow(ratio_check) > 20) {
       is_stock <- (mean(ratio_check$parts / ratio_check$total, na.rm = TRUE) > 2)
     }
+  } else {
+    # No month+quarter data at all (e.g. an annual-only "on December 31st"
+    # snapshot) - the ratio check above can never run, so title text is
+    # the only signal available for these.
+    is_stock <- grepl(STOCK_TITLE_PATTERN, table_title, ignore.case = TRUE)
   }
 
   catalog_row <- tibble::tibble(

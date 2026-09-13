@@ -70,7 +70,9 @@ DATASET_LABELS <- c(
 
 con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
-dbDisconnect(con, shutdown = TRUE)
+# con stays open through the breakdown-row generation below (really_filler_levels()
+# needs it to content-check generic-fallback labels against `facts`) - disconnected
+# after that loop, near the bottom of this section.
 
 # No lookups passed in - these are the fresh, un-overridden "(auto)"
 # values, regardless of whatever "(custom)" overrides are already active
@@ -90,7 +92,17 @@ citation_title <- vapply(seq_len(nrow(dim_map)), function(i) {
 # per breakdown level (or one blank-breakdown row if the table has none) --
 long <- lapply(seq_len(nrow(dim_map)), function(i) {
   cl <- dim_map$classification[[i]]
-  breakdown_rows <- cl[is.na(cl$geo_rank) & !cl$is_filler, , drop = FALSE]
+  # Same content-aware filler check as 08_build_series_facts.R's
+  # table_shape() (see really_filler_levels()'s own comment) - without
+  # this, a generic-fallback level that 08 content-overrides into a real,
+  # mergeable facet would never get an editable row here, leaving no way to
+  # give two tables' same real-world dimension a matching label (the actual
+  # bug this fixed: temporary_workers/520ac8e1's "Program Level 2" and
+  # temporary_workers/d5779439's "Program" are the same breakdown, but 08's
+  # exact-string facet grouping only recognizes that once both resolve to
+  # the same label text).
+  really_filler <- really_filler_levels(cl, con, dim_map$table_id[i])
+  breakdown_rows <- cl[is.na(cl$geo_rank) & !really_filler, , drop = FALSE]
 
   if (nrow(breakdown_rows) == 0) {
     data.frame(
@@ -108,6 +120,7 @@ long <- lapply(seq_len(nrow(dim_map)), function(i) {
     )
   }
 }) |> bind_rows()
+dbDisconnect(con, shutdown = TRUE)
 
 # A table whose own level labels aren't distinct after normalization (e.g.
 # a mislabeled table where two/three levels all read literally "Immigration
