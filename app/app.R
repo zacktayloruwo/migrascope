@@ -1019,8 +1019,24 @@ server <- function(input, output, session) {
       p <- p + scale_fill_manual(values = "#0b4f6c")
     }
 
+    # y/margin.b together control the gap between the (angled) x-axis
+    # labels and the legend below them - tightened from the defaults
+    # (y = -0.3, b = 100) which left a lot of empty vertical space; these
+    # still leave enough room for the 45-degree-angled axis.text.x labels
+    # above the legend to not get clipped.
+    # y/margin.b together control the gap between the (angled) x-axis
+    # labels and the legend below them - tightened from the defaults
+    # (y = -0.3, b = 100) which left a lot of empty vertical space; these
+    # still leave enough room for the 45-degree-angled axis.text.x labels
+    # above the legend to not get clipped. A facet with many long-labelled
+    # categories (e.g. 4-digit NOC occupation codes) can still need more
+    # legend rows than any fixed margin reserves - already true before
+    # this change too (verified against the old y/margin values), not
+    # something this introduces; the card's own overflow:auto lets that
+    # rare case scroll rather than clip outright.
     ggplotly(p, tooltip = "text") |>
-      layout(legend = list(orientation = "h", y = -0.3), margin = list(b = 100))
+      layout(legend = list(orientation = "h", y = -0.12, font = list(size = 14)),
+             margin = list(b = 55))
   })
 }
 

@@ -18,7 +18,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 - L'**agrégation temporelle** regroupe les données par mois, trimestre ou année, selon ce que le tableau sélectionné prend réellement en charge.
 - La **répartition par catégorie** choisit quelle dimension (p. ex. province, genre, pays de citoyenneté) divise les barres en un graphique empilé; « Total » affiche une seule série.
 - Le **nombre maximal de catégories affichées** regroupe toute catégorie au-delà des N premières (selon la valeur totale) sous « Autre » afin que les graphiques comportant des centaines de valeurs distinctes (p. ex. pays, subdivisions de recensement) restent lisibles.
-- Les répartitions par province/territoire sont classées d'ouest en est, et « Autre » est toujours affiché en gris.
+- Les catégories sont empilées de la plus grande (en bas) à la plus petite (en haut), et « Autre » est toujours affiché en gris tout en bas.
 - Pour les tableaux de **stock** (instantanés ponctuels, p. ex. « avec un permis valide au 31 décembre »), les vues trimestrielles/annuelles affichent la valeur du dernier mois disponible par entité plutôt que la somme des mois - le titre du graphique le signale explicitement.
 
 #### Remarques sur la qualité des données

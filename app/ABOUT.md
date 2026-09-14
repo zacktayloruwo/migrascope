@@ -18,7 +18,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 - **Temporal aggregation** rolls the data up to Monthly, Quarterly, or Annual, limited to what the selected table actually supports.
 - **Category breakdown** picks which dimension (e.g. province, gender, country of citizenship) splits the bars into a stacked chart; "Total" shows a single series.
 - **Max categories shown** folds every category past the top N (by total value) into "Other" so charts with hundreds of distinct values (e.g. countries, census subdivisions) stay readable.
-- Province/territory breakdowns are ordered west to east, and "Other" is always shown in grey.
+- Categories are stacked largest at the bottom to smallest at the top, and "Other" is always shown in grey at the very bottom.
 - For **stock** tables (point-in-time snapshots, e.g. "with a valid permit on December 31st"), Quarterly/Annual views show the latest available month's value per entity rather than summing months - the chart title flags these explicitly.
 
 #### Data quality notes

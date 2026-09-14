@@ -526,9 +526,9 @@ collapse_to_top_n <- function(d, top_n) {
 
 #' A category label that names an ordinal cohort/bucket range - age groups
 #' ("0 to 14 years old", "60 to 74 years of age"), years-since-arrival
-#' buckets, etc - starts with a number. Sorting these as plain text would
-#' put "15 to 29" before "0 to 14"; sorting by total value scrambles the
-#' bucket order entirely. Matched on the LEADING number only, so
+#' buckets, etc - starts with a number. Sorting these by size scrambles
+#' the bucket order entirely (and sorting as plain text would put "15 to
+#' 29" before "0 to 14"). Matched on the LEADING number only, so
 #' e.g. "0 to 14 years old" and "60 to 74 years of age" both match.
 #' Matches (and captures) the leading number, consuming the rest of the
 #' string too - sub() only replaces what the pattern matches, not
@@ -537,50 +537,47 @@ collapse_to_top_n <- function(d, top_n) {
 #' stuck onto the captured digits.
 ORDINAL_COHORT_REGEX <- "^\\s*(\\d+).*$"
 
-#' Is this set of (non-"Other"/"NA"/"Suppressed Residual") category labels
-#' an ordinal cohort breakdown? A majority match is enough (mirrors the
-#' geographic heuristic below) - a stray non-numeric value like "Age not
-#' stated" alongside real buckets shouldn't disqualify the whole set from
-#' being sorted low-to-high.
+#' Is this set of (non-"Other"/"NA") category labels an ordinal cohort
+#' breakdown? A majority match is enough - a stray non-numeric value like
+#' "Age not stated" alongside real buckets shouldn't disqualify the whole
+#' set from being kept in ordinal order.
 is_ordinal_cohort <- function(labels) {
   length(labels) > 0 &&
     sum(grepl(ORDINAL_COHORT_REGEX, labels)) >= max(2, ceiling(length(labels) / 2))
 }
 
-#' Determine category display order:
-#'  - west-to-east if the categories look like a province/territory
-#'    breakdown (at least half, and at least 3, are recognized Canadian
-#'    provinces/territories - any unrecognized values, e.g. "Province/
-#'    Territory not stated", are kept but appended after the recognized
-#'    ones);
-#'  - low-to-high if they look like an ordinal cohort/age-group breakdown
-#'    (see is_ordinal_cohort()) - any non-numeric-leading stragglers sort
-#'    alphabetically after the numeric ones;
-#'  - otherwise plain alphabetical.
-#' "NA" (a literal missing-value category), "Other" (the residual bucket
-#' from collapse_to_top_n()), and "Suppressed Residual" are never sorted
-#' among the "real" categories above - they're always moved to the right
-#' end of the legend, in that fixed relative order, regardless of which
-#' convention applied to everything else.
+#' Determine category display/stack order:
+#'  - low-to-high if the categories look like an ordinal cohort/age-group
+#'    breakdown (see is_ordinal_cohort()) - sorting these by size would
+#'    scramble a sequence readers expect to see in order; any non-
+#'    numeric-leading stragglers sort alphabetically after the numeric
+#'    ones (so they end up nearest the bottom, closest to "Other"/"NA");
+#'  - otherwise by total value, largest at the bottom of the stack,
+#'    smallest at the top. ggplot2's default position_stack() puts a
+#'    factor's *first* level at the top of the bar and its *last* level
+#'    at the bottom, so `cat_totals_desc` (already sorted largest-to-
+#'    smallest, see build_series_plot_data() below) is reversed to get
+#'    that top-to-bottom = smallest-to-largest layout.
+#' "NA" (a literal missing-value category) and "Other" (the residual
+#' bucket from collapse_to_top_n()) are never sorted among the "real"
+#' categories above - they're always moved to the very end (the very
+#' bottom of the stack), in that fixed relative order, regardless of
+#' their own size.
 order_categories <- function(cat_totals_desc) {
   all_cats <- cat_totals_desc$category
-  trailing <- intersect(c("NA", "Other", "Suppressed Residual"), all_cats)
-  non_other <- setdiff(all_cats, trailing)
+  trailing <- intersect(c("NA", "Other"), all_cats)
+  non_other <- all_cats[!all_cats %in% trailing]
 
-  recognized <- intersect(PROVINCE_ORDER_WEST_TO_EAST, non_other)
-  is_geographic <- length(non_other) > 0 &&
-    length(recognized) >= max(3, ceiling(length(non_other) / 2))
-
-  if (is_geographic) {
-    unrecognized <- setdiff(non_other, PROVINCE_ORDER_WEST_TO_EAST)
-    ordered <- c(recognized, unrecognized)
-  } else if (is_ordinal_cohort(non_other)) {
+  if (is_ordinal_cohort(non_other)) {
     is_numeric <- grepl(ORDINAL_COHORT_REGEX, non_other)
     numeric_part <- non_other[is_numeric]
     numeric_part <- numeric_part[order(as.numeric(sub(ORDINAL_COHORT_REGEX, "\\1", numeric_part, perl = TRUE)))]
     ordered <- c(numeric_part, sort(non_other[!is_numeric]))
   } else {
-    ordered <- sort(non_other)
+    # non_other is already sorted largest-to-smallest (from
+    # cat_totals_desc); reverse it so the smallest ends up first (top of
+    # stack) and the largest ends up last (bottom, just above "Other"/"NA").
+    ordered <- rev(non_other)
   }
 
   c(ordered, trailing)
