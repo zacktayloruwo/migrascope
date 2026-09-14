@@ -30,7 +30,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 Data is pulled from the [Government of Canada Open Data Portal](https://open.canada.ca/) using the API and loaded into a local database on a periodic refresh cycle. It is not a live query against IRCC/IRB systems. See the citation under each chart for the exact source table and its last-updated date.
 
-A total of 85 distinct tables are included in the database.
+A total of {{N_TABLES}} distinct tables are included in the database.
 
 Note that where multiple open data tables contain equivalent information, the one with the least suppressed data was accessed. This is always the Excel file when both an Excel and CSV file exist.
 

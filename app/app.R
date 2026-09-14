@@ -168,9 +168,17 @@ table_citation_ui <- function(table_ids, theme_table_ids, lang = "en") {
 # HTML once at startup rather than per-session, for each language. ABOUT_fr.md
 # is a hand-translated sibling (genuine long-form prose - not derived from
 # STRINGS/i18n.R, which only covers short chrome strings).
-about_html_en <- markdown(paste(readLines("ABOUT.md", warn = FALSE), collapse = "\n"))
+#
+# {{N_TABLES}} is substituted with the live catalog row count before
+# markdown conversion - the table count changes as tables are added/
+# excluded across pipeline runs, and a hand-typed number here has already
+# gone stale once (the page said "85" when the catalog actually held 71).
+n_tables_text <- as.character(dbGetQuery(con, "SELECT COUNT(*) n FROM catalog")$n)
+about_html_en <- markdown(gsub("{{N_TABLES}}",
+  n_tables_text, paste(readLines("ABOUT.md", warn = FALSE), collapse = "\n"), fixed = TRUE))
 about_html_fr <- if (file.exists("ABOUT_fr.md")) {
-  markdown(paste(readLines("ABOUT_fr.md", warn = FALSE), collapse = "\n"))
+  markdown(gsub("{{N_TABLES}}",
+    n_tables_text, paste(readLines("ABOUT_fr.md", warn = FALSE), collapse = "\n"), fixed = TRUE))
 } else {
   about_html_en
 }
@@ -180,7 +188,17 @@ about_html_fr <- if (file.exists("ABOUT_fr.md")) {
 ui <- page_sidebar(
   title = div(
     class = "d-flex justify-content-between align-items-center w-100",
-    h1(tr("app_title"), id = "app_title", class = "bslib-page-title navbar-brand"),
+    h1(
+      id = "app_title", class = "bslib-page-title navbar-brand",
+      # "MigraScope" is the brand name and never changes with language -
+      # only the descriptive suffix after it does (app_title_suffix,
+      # swapped via the setLang custom message below, which retargets
+      # #app_title_suffix's own textContent and so never touches this
+      # sibling span).
+      tags$span("MigraScope", class = "brand-name"),
+      " | ",
+      tags$span(tr("app_title_suffix"), id = "app_title_suffix", class = "brand-suffix")
+    ),
     div(
       class = "d-flex gap-2 align-items-center",
       actionButton("lang_toggle", tr("lang_toggle_to_fr"), class = "btn-sm btn-outline-light"),
@@ -191,15 +209,20 @@ ui <- page_sidebar(
   # `title` is now a tag (buttons alongside the heading), not a plain
   # string - bslib infers the browser tab title by extracting all text
   # from it otherwise, which would pull in the button labels too.
-  window_title = "Canadian Immigration Statistics Visualizer",
+  window_title = "MigraScope | Canadian Immigration Statistics Visualizer",
   # heading_font matches app/www/custom.css's existing "Noto Sans"
   # font-family rules for h4/h5/h6/the navbar title (those were previously
   # a no-op fallback to generic `serif` since nothing actually loaded Noto
-  # Sans from Google Fonts until now).
+  # Sans from Google Fonts until now). Noto Serif is loaded separately
+  # below (a plain Google Fonts <link>, not font_google()) purely for the
+  # "MigraScope" brand mark - bs_theme()'s base/heading_font both stay
+  # Noto Sans, the font used everywhere else in the app.
   theme = bs_theme(version = 5, primary = "#0b4f6c",
                     base_font = font_google("Noto Sans"),
                     heading_font = font_google("Noto Sans")),
   tags$head(
+    tags$link(rel = "stylesheet",
+               href = "https://fonts.googleapis.com/css2?family=Noto+Serif:wght@700&family=Noto+Sans:wght@300&display=swap"),
     # A cache-busting query string keyed to the file's own mtime - without
     # one, a browser that already cached an older custom.css (e.g. from a
     # previous deploy) can keep serving those stale styles indefinitely
@@ -355,25 +378,45 @@ ui <- page_sidebar(
                  value = 10, min = 2, max = 15),
     helpText(id = "lbl_suppression_note", tr("suppression_note"))
   ),
-  navset_hidden(
-    id = "main_view",
-    nav_panel(
-      "plot",
-      card(
-        full_screen = TRUE,
-        card_header(textOutput("plot_title")),
-        plotlyOutput("plot", height = "600px"),
-        card_footer(uiOutput("source_citation"))
-      )
+  # navset_hidden()'s own markup (plain Bootstrap .tabbable/.tab-content/
+  # .tab-pane divs, via shiny::tabsetPanel_()) isn't part of bslib's fill
+  # system at all, so a percentage-height card inside it has nothing to
+  # size against and collapses to 0. as_fill_carrier(x) (no css_selector)
+  # only ever tags `x`'s own root tag(s), not arbitrary descendants - and
+  # navset_hidden()'s actual root here is the wrapping div below, not
+  # .tabbable/.tab-content/.tab-pane nested inside it - so each of those
+  # three needs its own explicit css_selector pass (bslib/htmltools doesn't
+  # support comma-separated selectors) to get the same fill-item +
+  # fill-container roles page_sidebar's own main area already has,
+  # propagating fillable height all the way down to the plot card.
+  as_fill_carrier(
+    as_fill_carrier(
+      as_fill_carrier(
+        as_fill_carrier(div(navset_hidden(
+          id = "main_view",
+          nav_panel(
+            "plot",
+            card(
+              full_screen = TRUE,
+              card_header(textOutput("plot_title")),
+              plotlyOutput("plot", height = "100%"),
+              card_footer(uiOutput("source_citation"))
+            )
+          ),
+          nav_panel(
+            "about",
+            card(
+              full_screen = TRUE,
+              card_header(tr("about_page_title"), id = "lbl_about_header"),
+              div(class = "p-4", uiOutput("about_content"))
+            )
+          )
+        ))),
+        css_selector = ".tabbable"
+      ),
+      css_selector = ".tab-content"
     ),
-    nav_panel(
-      "about",
-      card(
-        full_screen = TRUE,
-        card_header(tr("nav_about"), id = "lbl_about_header"),
-        div(class = "p-4", style = "max-width: 800px;", uiOutput("about_content"))
-      )
-    )
+    css_selector = ".tab-pane"
   )
 )
 
@@ -417,7 +460,7 @@ server <- function(input, output, session) {
     updateActionButton(session, "go_about", label = tr("nav_about", l))
     session$sendCustomMessage("setLang", list(
       "__lang"               = l,
-      app_title               = tr("app_title", l),
+      app_title_suffix        = tr("app_title_suffix", l),
       lbl_theme                = tr("theme_label", l),
       lbl_series               = tr("series_label", l),
       lbl_geo_unit              = tr("geo_unit_label", l),
@@ -430,7 +473,7 @@ server <- function(input, output, session) {
       lbl_year_range            = tr("year_range_label", l),
       lbl_top_n                 = tr("top_n_label", l),
       lbl_suppression_note      = tr("suppression_note", l),
-      lbl_about_header          = tr("nav_about", l)
+      lbl_about_header          = tr("about_page_title", l)
     ))
     # Radio-button CHOICE labels (as opposed to the section header above
     # each one) aren't plain static text - they're rebuilt via

@@ -73,10 +73,17 @@ SERIES_FACET_LABELS_FR <- c(
 )
 
 STRINGS <- list(
-  app_title          = c(en = "Canadian Immigration Statistics Visualizer",
+  # The navbar title is "MigraScope" (brand name, invariant across
+  # languages) plus this descriptive suffix - kept separate from
+  # nav_about/about_page_title below so the brand name can be styled
+  # distinctly (Noto Serif Bold) from the rest of the title (Noto Sans
+  # Light) without the language-switch textContent swap (setLang, this
+  # file's own doc comment above) clobbering that markup.
+  app_title_suffix   = c(en = "Canadian Immigration Statistics Visualizer",
                           fr = "Visualiseur de statistiques sur l'immigration canadienne"),
   nav_visualize      = c(en = "Visualize",              fr = "Visualiser"),
   nav_about          = c(en = "About",                  fr = "À propos"),
+  about_page_title   = c(en = "About MigraScope",       fr = "À propos de MigraScope"),
   lang_toggle_to_fr  = c(en = "Français",                fr = "English"),
 
   theme_label        = c(en = "Select Theme",           fr = "Choisir un thème"),

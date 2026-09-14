@@ -170,9 +170,25 @@ parse_geo_unit <- function(geo_unit) {
 #' NULL comparison SQL never treats as a match, which would otherwise
 #' promote the entire-table grand total into the leaf set and massively
 #' double-count everything.
+#'
+#' `n_levels` (from `catalog`) is a table's true nominal nesting depth and
+#' can exceed `MAX_LEVELS_IN_FACTS` - `facts` itself only ever stores
+#' level_1..level_5 (data-raw/R/duckdb_utils.R's own MAX_LEVELS, padding
+#' shallower tables and truncating deeper ones to that width so every
+#' table shares one column set). A row nested past that depth still has a
+#' real row_level (row_level isn't truncated, only the level_N text
+#' columns are) but no level_6+ text to tell it apart from a same-prefix
+#' intermediate subtotal - so instead of the exact `row_level == n_levels`
+#' match that works for every ordinarily-shaped table, anything at or past
+#' the physical cap is treated as a leaf outright. Capping `n_levels`
+#' itself first also keeps the loop below from requesting a level_N
+#' column that was never kept for such a table.
+MAX_LEVELS_IN_FACTS <- 5
+
 true_leaf_rows <- function(con, table_id, n_levels) {
+  n_levels <- min(n_levels, MAX_LEVELS_IN_FACTS)
   base <- dplyr::tbl(con, "facts") |> dplyr::filter(.data$table_id == !!table_id)
-  leaves <- base |> dplyr::filter(.data$row_level == !!n_levels)
+  leaves <- base |> dplyr::filter(.data$row_level >= !!n_levels)
 
   if (n_levels > 1) {
     for (k in seq(n_levels - 1, 1)) {

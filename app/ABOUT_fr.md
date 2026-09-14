@@ -30,7 +30,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 
 Les données proviennent du [Portail du gouvernement ouvert du Canada](https://open.canada.ca/) via son API et sont chargées dans une base de données locale selon un cycle de rafraîchissement périodique. Il ne s'agit pas d'une requête en direct sur les systèmes d'IRCC/CISR. Voir la citation sous chaque graphique pour le tableau source exact et sa date de dernière mise à jour.
 
-Un total de 85 tableaux distincts sont inclus dans la base de données.
+Un total de {{N_TABLES}} tableaux distincts sont inclus dans la base de données.
 
 Notez que lorsque plusieurs tableaux de données ouvertes contiennent une information équivalente, celui dont les données sont le moins censurées a été utilisé. Il s'agit toujours du fichier Excel lorsqu'il existe à la fois un fichier Excel et un fichier CSV.
 

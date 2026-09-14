@@ -21,6 +21,21 @@
   color: var(--bs-body-color);
 }
 
+/* "MigraScope" brand mark within the app title - Noto Serif Bold, set
+   apart from the rest of the title (brand-suffix below, Noto Sans
+   Light), loaded via its own Google Fonts <link> in app.R's tags$head
+   (not the bs_theme() base/heading_font, which both stay Noto Sans). */
+.brand-name {
+  font-family: "Noto Serif", serif;
+  font-weight: 700;
+}
+
+/* The descriptive text after "MigraScope | " in the app title. */
+.brand-suffix {
+  font-family: "Noto Sans", sans-serif;
+  font-weight: 300;
+}
+
 /* Sidebar heading (sidebar's `title =`, e.g. "Options") - bslib scopes its
    own font-size to `.bslib-sidebar-layout .sidebar-title`, so match that. */
 .bslib-sidebar-layout .sidebar-title {

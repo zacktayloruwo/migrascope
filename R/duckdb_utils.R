@@ -405,9 +405,17 @@ normalize_table <- function(long, table_id, dataset, table_title) {
   facts <- facts |>
     dplyr::mutate(dplyr::across(dplyr::starts_with("level_"), as.character))
 
-  # pad up to MAX_LEVELS so every table's facts share one column set
-  for (i in (n_levels + 1):MAX_LEVELS) {
-    facts[[paste0("level_", i)]] <- NA_character_
+  # pad up to MAX_LEVELS so every table's facts share one column set - a
+  # table nested deeper than MAX_LEVELS (n_levels > MAX_LEVELS) needs no
+  # padding at all (its levels get truncated to 1:MAX_LEVELS by the
+  # select() below instead); the guard matters because `:` counts downward
+  # when its left side exceeds its right (e.g. `(9):5` is `9,8,7,6,5`, not
+  # empty), which would otherwise overwrite real level_5 (and beyond)
+  # content with NA for every such table.
+  if (n_levels < MAX_LEVELS) {
+    for (i in (n_levels + 1):MAX_LEVELS) {
+      facts[[paste0("level_", i)]] <- NA_character_
+    }
   }
   facts <- facts |>
     dplyr::mutate(table_id = table_id) |>
