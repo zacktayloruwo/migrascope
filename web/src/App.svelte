@@ -101,7 +101,7 @@
       <article class="card about">
         <h1>{i18n.t('about_page_title', app.lang)}</h1>
         <!-- Rendered at build time from app/ABOUT*.md, which is part of this repo. -->
-        {@html app.meta.aboutHtml[app.lang]}
+        <div class="about-text">{@html app.meta.aboutHtml[app.lang]}</div>
         {#if app.meta.dataPulled}
           <p class="pulled">
             {#if app.lang === 'fr'}
@@ -163,10 +163,15 @@
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }
   .note { margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
-  .about { max-width: 860px; line-height: 1.65; }
-  .about h1 { margin-top: 0; font-size: 26px; }
+  /* Fills the window below the header; text flows into a second column once there's room for two readable ones. */
+  .about { min-height: calc(100vh - 88px); line-height: 1.6; display: flex; flex-direction: column; }
+  .about h1 { margin: 0 0 8px; font-size: 24px; }
+  .about-text { columns: 2 34em; column-gap: 48px; column-rule: 1px solid var(--border); flex: 1; }
+  .about-text :global(:first-child) { margin-top: 0; }
+  .about-text :global(h4) { break-after: avoid; }
+  .about-text :global(li), .about-text :global(p) { break-inside: avoid; }
   .pulled { margin: 24px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: 14px; color: var(--ink-2); }
   .about :global(h3) { font-family: var(--font-display); font-weight: 400; font-size: 22px; }
-  .about :global(h4) { font-size: 17px; margin-bottom: 4px; }
+  .about :global(h4) { font-size: 16px; margin: 18px 0 4px; }
   @media (max-width: 640px) { .page { padding: 16px 12px 32px; } .card { padding: 16px; } }
 </style>

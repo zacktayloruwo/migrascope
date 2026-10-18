@@ -1,5 +1,3 @@
-### About this app
-
 This app visualizes Canadian immigration and refugee statistics published as open data by **Immigration, Refugees and Citizenship Canada (IRCC)** and the **Immigration and Refugee Board of Canada (IRB)**. Pick a theme and a data table in the sidebar, choose how to aggregate and break the data down, and the chart updates automatically.
 
 The app was created by Dr. Zack Taylor, Dept. of Political Science, at the University of Western Ontario out of frustration with making ad hoc plots from these excel sheets.

@@ -1,5 +1,3 @@
-### À propos de cette application
-
 Cette application visualise les statistiques canadiennes sur l'immigration et les réfugiés publiées en tant que données ouvertes par **Immigration, Réfugiés et Citoyenneté Canada (IRCC)** et la **Commission de l'immigration et du statut de réfugié du Canada (CISR)**. Choisissez un thème et un tableau de données dans le panneau latéral, choisissez comment agréger et répartir les données, et le graphique se met à jour automatiquement.
 
 L'application a été créée par le Dr Zack Taylor, département de science politique, à l'Université Western Ontario, par frustration face à la création de graphiques ponctuels à partir de ces feuilles Excel.
