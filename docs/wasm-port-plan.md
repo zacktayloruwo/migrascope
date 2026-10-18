@@ -489,8 +489,8 @@ Repeating this on an iPhone, by opening `/bench/?c=A`, `?c=C` etc. from a phone 
 
 1. ~~**Framework**~~: decided 2026‑10‑18, Svelte 5.
 2. ~~**Query engine**~~: decided 2026‑10‑18, hyparquet + TypeScript.
-3. **Hosting:** GitHub Pages (simplest if the repo moves to GitHub) or Cloudflare Pages (better caching and headers).
+3. ~~**Hosting**~~: decided 2026‑10‑18, GitHub Pages from the public `zacktayloruwo/migrascope` repo, deployed by `.github/workflows/pages.yml` on every push to `main` (tests → build → deploy).
 4. **Description authoring:** YAML in the repo (recommended) or an Excel sheet like `label_overrides.xlsx`.
 5. **Event annotations:** include them (needs your curation) or leave them out.
 6. **Old Shiny deployments** (shinyapps.io and Posit Connect Cloud): redirect them or keep them running.
-7. **Data in git:** `web/public/data/` (2.9 MB of Parquet plus JSON) and `web/tests/golden/` (11 MB) are derived from the gitignored database, but CI and GitHub Pages need them. Options: commit them on each refresh, or publish them from a release step. Committing is simplest; the golden files could be gzipped.
+7. ~~**Data in git**~~: decided 2026‑10‑18, commit `web/public/data/` and `web/tests/golden/` on each refresh, so CI can run the parity tests and build the site.
