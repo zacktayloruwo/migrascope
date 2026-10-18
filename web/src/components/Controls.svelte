@@ -19,6 +19,13 @@
     : [])
   const themes = $derived(THEMES.filter((t) => app.meta.summary.some((r) => r.theme === t.id)))
   const unavailable = $derived(GEO_LEVELS.filter((g) => !app.geoAvailable.has(g)))
+  const TOP_N_CHOICES = Array.from({ length: 14 }, (_, i) => i + 2) // 2-15, as in the R app
+  /** "Max categories shown (rest grouped as 'Other')" split before the bracket, shown on two lines. */
+  const topNLabel = $derived.by(() => {
+    const text = i18n.t('top_n_label', l)
+    const i = text.indexOf(' (')
+    return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + 1)]
+  })
 </script>
 
 <section class="card" aria-label={l === 'fr' ? 'Paramètres du graphique' : 'Chart settings'}>
@@ -114,7 +121,7 @@
                 onchange={(e) => app.setYears(Number(e.currentTarget.value), app.years[1])}>
           {#each yearOptions as y (y)}<option value={y}>{y}</option>{/each}
         </select>
-        <span aria-hidden="true">–</span>
+        <span class="arrow" aria-hidden="true">→</span>
         <select aria-label={l === 'fr' ? 'Dernière année' : 'Last year'} value={app.years[1]}
                 onchange={(e) => app.setYears(app.years[0], Number(e.currentTarget.value))}>
           {#each yearOptions as y (y)}<option value={y}>{y}</option>{/each}
@@ -122,14 +129,11 @@
       </div>
     </div>
 
-    <label class="group">
-      <span class="label">{i18n.t('top_n_label', l)}</span>
-      <input type="number" min="2" max="15" value={app.topN}
-             onchange={(e) => {
-               const n = Math.round(Number(e.currentTarget.value))
-               app.topN = Number.isFinite(n) ? Math.min(15, Math.max(2, n)) : 10
-               e.currentTarget.value = String(app.topN)
-             }} />
+    <label class="group inline">
+      <span class="label">{topNLabel[0]}{#if topNLabel[1]}<br />{topNLabel[1]}{/if}</span>
+      <select value={app.topN} onchange={(e) => (app.topN = Number(e.currentTarget.value))}>
+        {#each TOP_N_CHOICES as n (n)}<option value={n}>{n}</option>{/each}
+      </select>
     </label>
   </div>
 </section>
@@ -167,13 +171,14 @@
   .segmented button[aria-pressed='true'] { background: var(--primary); color: #fff; font-weight: 600; }
   .segmented button:disabled { color: #8A93A2; background: #F4F2EE; cursor: not-allowed; }
   .years { display: flex; align-items: center; gap: 6px; }
-  .years select, input[type='number'] {
+  .group.inline { flex-direction: row; align-items: center; gap: 8px; }
+  .arrow { color: var(--ink-3); }
+  .years select, .group select {
     border: 1px solid var(--border-strong); border-radius: 7px; padding: 3px 6px; background: var(--surface); min-height: 30px;
   }
-  input[type='number'] { width: 60px; }
   @media (max-width: 640px) {
     .card { padding: 12px; }
     /* Larger touch targets on phones. */
-    .segmented button, .years select, input[type='number'] { min-height: 40px; }
+    .segmented button, .years select, .group select { min-height: 40px; }
   }
 </style>
