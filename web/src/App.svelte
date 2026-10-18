@@ -162,16 +162,19 @@
   .icon-button:hover { background: var(--primary-tint); color: var(--primary); }
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }
-  .note { margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
+  .note { margin: 0; font-weight: 400; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
   /* Fills the window below the header; text flows into a second column once there's room for two readable ones. */
-  .about { min-height: calc(100vh - 88px); line-height: 1.6; display: flex; flex-direction: column; }
+  .about { min-height: calc(100vh - 88px); line-height: 1.4; display: flex; flex-direction: column; }
   .about h1 { margin: 0 0 8px; font-size: 24px; }
   .about-text { columns: 2 34em; column-gap: 48px; column-rule: 1px solid var(--border); flex: 1; }
   .about-text :global(:first-child) { margin-top: 0; }
   .about-text :global(h4) { break-after: avoid; }
   .about-text :global(li), .about-text :global(p) { break-inside: avoid; }
+  .about-text :global(p) { margin: 0 0 0.6em; }
+  .about-text :global(ul) { margin: 0 0 0.6em; padding-left: 1.2em; }
+  .about-text :global(li) { margin-bottom: 0.25em; }
   .pulled { margin: 24px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: 14px; color: var(--ink-2); }
   .about :global(h3) { font-family: var(--font-display); font-weight: 400; font-size: 22px; }
-  .about :global(h4) { font-size: 16px; margin: 18px 0 4px; }
+  .about :global(h4) { font-family: var(--font-display); font-weight: 400; font-size: 18px; line-height: 1.25; margin: 16px 0 4px; }
   @media (max-width: 640px) { .page { padding: 16px 12px 32px; } .card { padding: 16px; } }
 </style>

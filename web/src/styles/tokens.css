@@ -28,12 +28,16 @@ body {
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-body);
+  font-weight: 300; /* Noto Sans Light for running text; controls and small print stay at regular weight below */
   font-size: 15px;
   line-height: 1.45;
 }
 a { color: var(--primary); }
 a:hover { color: var(--primary-hover); }
 button, select, input { font: inherit; color: inherit; }
+/* Light is too thin to read comfortably at caption sizes and on controls. */
+button, select, input, label, small { font-weight: 400; }
+strong, b { font-weight: 600; }
 :where(button, a, select, input, summary):focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 h1, h2 { font-family: var(--font-display); font-weight: 400; }
 .visually-hidden {

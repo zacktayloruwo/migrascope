@@ -35,5 +35,5 @@
 {/if}
 
 <style>
-  .citation { margin: 0; font-size: 11px; line-height: 1.3; color: #5A6578; }
+  .citation { margin: 0; font-weight: 400; font-size: 11px; line-height: 1.3; color: #5A6578; }
 </style>

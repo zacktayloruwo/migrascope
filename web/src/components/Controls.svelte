@@ -157,7 +157,7 @@
   }
   .group { display: flex; flex-direction: column; gap: 3px; }
   .label { color: var(--ink-3); font-weight: 600; font-size: 12px; max-width: 220px; line-height: 1.3; }
-  .hint { color: var(--ink-3); font-size: 11px; max-width: 360px; }
+  .hint { color: var(--ink-3); font-weight: 400; font-size: 11px; max-width: 360px; }
   .segmented { display: flex; flex-wrap: wrap; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
   .segmented button {
     border: 0; border-left: 1px solid var(--border-strong); background: var(--surface);
