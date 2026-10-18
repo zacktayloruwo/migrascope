@@ -196,17 +196,27 @@ The R logic has a lot of hard‑won edge cases: stock tables, NA quarters in pre
 
 ## 3. Feature parity checklist
 
-- [ ] Theme / Series / Geographic unit / Break down by / Drill 1 / Drill 2 cascade, with the same defaults (series ranked by scope count, geo depth, …)
-- [ ] Granularity limited to what the series supports; year range resets to the series span
-- [ ] Geographic aggregation ranks disabled when unavailable, **with the reason shown inline** rather than only in a `title` tooltip
-- [ ] Absolute vs % of total (disabled for a single bar)
-- [ ] Top‑N folding into "Other"; Suppressed Residual at the top level only
-- [ ] Stock‑table title suffix and aggregation rule
-- [ ] Stacking order: largest at bottom, ordinal cohorts kept in order, Other / NA / Suppressed in fixed colours
-- [ ] EN/FR toggle for all chrome, theme/series/facet labels, category values and number formats (space thousands separator, decimal comma)
-- [ ] Citation footer from the contributing source tables, with the merged‑refugees fallback
-- [ ] About page (`ABOUT.md` / `ABOUT_fr.md` rendered at build time, `{{N_TABLES}}` filled from `manifest.json`)
-- [ ] Full‑screen chart
+Status as of 2026‑10‑18 (Phase 2, Svelte app in `web/src/`; run with `npm run dev` in `web/`):
+
+- [x] Theme / Series / Geographic unit / Break down by / Drill 1 / Drill 2 cascade, with the same defaults (series ranked by scope count, geo depth, …). The rules are in `web/src/lib/state.svelte.ts`.
+- [x] Granularity limited to what the series supports; year range resets to the series span. It resets only when the resolved view changes, not when you pick another place (a deliberate improvement).
+- [x] Geographic aggregation ranks disabled when unavailable, **with the reason shown inline**.
+- [x] Absolute vs % of total (disabled for a single bar).
+- [x] Top‑N folding into "Other"; Suppressed Residual at the top level only. Covered by the parity tests.
+- [x] Stock‑table title suffix and aggregation rule.
+- [x] Stacking order matches R: largest at the bottom, ordinal cohorts kept in order, Other / NA / Suppressed in fixed colours, Suppressed hatched.
+- [x] EN/FR for all chrome, theme/series/facet labels, category values and number formats.
+- [x] Citation footer from the contributing source tables, with the merged‑refugees fallback.
+- [x] About page (rendered at export time by `10_export_web.R`, with the live table count).
+- [x] URL state: every view is a shareable link, restored on load (drill values are checked once the data arrives).
+- [x] Full‑screen chart (Fullscreen API button on the chart card).
+- [x] Show `views/<theme>.default.json` while the first partition loads, when the inputs match the defaults exactly. The PT partition is prefetched after National.
+- [ ] Side‑by‑side comparison with the Shiny app across themes. So far: spot checks, plus the 658 data parity tests.
+
+Phase 2 changes from the Shiny app:
+- **Controls:** a "sentence" of pill‑style selects (Show *theme* *series* broken down by *facet* › *drill* in *place*) with the other options below. This is the plain‑language layout from §4.1, built with native `<select>`s.
+- **Legend:** an HTML legend that wraps on phones; clicking an entry hides that category.
+- **Bundle:** the app is 203 KB gzipped (ECharts is most of it). It could be split so ECharts loads in parallel with the data.
 
 ---
 
@@ -339,7 +349,7 @@ More than 4 categories need an extended palette checked the same way before use.
 |---|---|---|
 | **0. Spike** ✅ (2–3 days) | Vite page boots DuckDB‑WASM from a static host, runs the stock and residual queries, draws one ECharts bar, and runs the timing comparison below | Comparison table filled in; layout decision recorded |
 | **1. Data export + golden tests** ✅ | `10_export_web.R`, `11_export_golden.R`, TS query layer, vitest parity suite | 100% of golden cases pass (658/658, 2026‑10‑18) |
-| **2. Parity app** | Full selector cascade, chart, citation, About, EN/FR, URL state | Parity checklist (§3) complete; side‑by‑side spot check against Shiny |
+| **2. Parity app** (in progress, Svelte) | Full selector cascade, chart, citation, About, EN/FR, URL state | Parity checklist (§3) complete; side‑by‑side spot check against Shiny |
 | **3. ⓘ popups** | `InfoTip` component, `descriptions.yml` drafted for all themes/controls, coverage check | No missing `en` ids; FR drafted |
 | **4. Engagement features** | Sentence builder, click‑to‑drill and breadcrumbs, share/cite/download, YTD marking, takeaway line, palette | Usability pass with 2–3 colleagues or students |
 | **5. Extras** | Landing cards, line/small‑multiples/map views, annotations, dark mode | — |
@@ -477,7 +487,7 @@ Repeating this on an iPhone, by opening `/bench/?c=A`, `?c=C` etc. from a phone 
 
 ## 8. Decisions for you
 
-1. **Framework:** Svelte (recommended) or React.
+1. ~~**Framework**~~: decided 2026‑10‑18, Svelte 5.
 2. ~~**Query engine**~~: decided 2026‑10‑18, hyparquet + TypeScript.
 3. **Hosting:** GitHub Pages (simplest if the repo moves to GitHub) or Cloudflare Pages (better caching and headers).
 4. **Description authoring:** YAML in the repo (recommended) or an Excel sheet like `label_overrides.xlsx`.

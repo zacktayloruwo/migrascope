@@ -5,18 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
     "@duckdb/duckdb-wasm": "1.32.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "svelte-check": "4.7.6",
     "typescript": "5.9.3",
     "vite": "8.3.2",
     "vitest": "5.0.3"
   },
   "dependencies": {
+    "echarts": "6.1.0",
     "hyparquet": "1.31.2",
-    "hyparquet-compressors": "1.1.2"
+    "hyparquet-compressors": "1.1.2",
+    "svelte": "5.57.1"
   }
 }

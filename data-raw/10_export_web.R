@@ -221,6 +221,15 @@ write_json(list(
   series_facet_fr = as.list(SERIES_FACET_LABELS_FR)
 ), "strings.json")
 
+# About pages, rendered the way app.R renders them (shiny::markdown() is
+# commonmark with GitHub extensions), with the live table count filled in.
+n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n
+for (lang in c("en", "fr")) {
+  src <- if (lang == "en") "app/ABOUT.md" else "app/ABOUT_fr.md"
+  md <- gsub("{{N_TABLES}}", n_tables, paste(readLines(src, warn = FALSE), collapse = "\n"), fixed = TRUE)
+  writeLines(commonmark::markdown_html(md, extensions = TRUE), file.path(OUT_DIR, sprintf("about_%s.html", lang)))
+}
+
 manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types = FALSE,
                                 col_types = readr::cols(last_modified_ckan = "c"))
 sources <- build_source_lookup(manifest_csv)
@@ -228,12 +237,12 @@ write_json(sources, "sources.json")
 
 # ---- manifest ---------------------------------------------------------------
 json_files <- c("series_summary.json", "geo_units.json", "landing.json", "strings.json",
-                "sources.json", sprintf("views/%s.default.json", names(default_views)),
+                "sources.json", "about_en.html", "about_fr.html", sprintf("views/%s.default.json", names(default_views)),
                 if (file.exists(file.path(OUT_DIR, "translations.parquet"))) "translations.parquet")
 write_json(list(
   built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
   data_through = sprintf("%d-%02d", data_through %/% 100, data_through %% 100),
-  n_tables = dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n,
+  n_tables = n_tables,
   series_facts = parquet_files,
   files = lapply(json_files, function(f) list(path = f, bytes = file.size(file.path(OUT_DIR, f)),
                                               hash = short_hash(file.path(OUT_DIR, f))))

@@ -30,7 +30,7 @@ export class DataStore {
   private cache = new Map<string, Promise<SeriesFactsColumns>>()
 
   /** `baseUrl` points at the exported data directory, e.g. `${import.meta.env.BASE_URL}data/`. */
-  constructor(private baseUrl: string) {}
+  constructor(readonly baseUrl: string) {}
 
   manifest(): Promise<Manifest> {
     this.manifestPromise ??= fetch(new URL('manifest.json', this.url()), { cache: 'no-cache' })
