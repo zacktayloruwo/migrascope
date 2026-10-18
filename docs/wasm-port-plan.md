@@ -52,10 +52,11 @@ Splitting by geo_level fits how the app queries:
 - **The landing cards** need only National files, and the Province/Territory map needs only PT.
 
 **Loading strategy:**
-1. On theme select, load `theme=<t>/geo_level=National` and draw the chart.
-2. When the browser is idle, prefetch the same theme's PT file, which is the next most likely level.
-3. Fetch CMA, CD and CSD only when the user picks them, behind a short skeleton.
-4. Keep at most about 4 files as in‑memory tables, dropping the least recently used (total data is 2.8 MB, so this is a safety margin for iOS Safari, not a necessity).
+1. The landing page renders entirely from `landing.json`, with no query engine involved.
+2. On theme select, draw the first chart straight from `views/<theme>.default.json`, which is instant. At the same time, load `theme=<t>/geo_level=National` (and the DuckDB engine, if it's kept) in the background. The first change to any control is then served by the live query layer.
+3. When the browser is idle, prefetch the same theme's PT file, which is the next most likely level.
+4. Fetch CMA, CD and CSD only when the user picks them, behind a short skeleton.
+5. Keep at most about 4 files as in‑memory tables, dropping the least recently used (total data is 2.8 MB, so this is a safety margin for iOS Safari, not a necessity).
 
 **Alternative considered:** keep one file per theme, sorted by `geo_level` first with small row groups, and query `read_parquet()` directly so DuckDB skips row groups using their min/max statistics. That avoids 21 files, but it decodes on every query instead of once, and its row‑group skipping in WASM is less predictable. Phase 0 compares both approaches and the result decides.
 
@@ -67,6 +68,8 @@ Splitting by geo_level fits how the app queries:
 R pipeline (unchanged 00–09)
    └─ NEW data-raw/10_export_web.R ──► web/public/data/
                                          ├─ series_facts/theme=<slug>/geo_level=<lvl>.parquet  (sorted, zstd; 21 files)
+                                         ├─ landing.json                         (pre-aggregated landing cards)
+                                         ├─ views/<theme>.default.json           (pre-aggregated default chart per theme)
                                          ├─ series_summary.json                  (drives every selector)
                                          ├─ geo_units.json                       (PT/CMA/CD/CSD pickers)
                                          ├─ translations.parquet                 (category_translations + series/facet FR)
@@ -89,7 +92,10 @@ web/  (Vite + TypeScript)
 - **UI framework:** **Svelte 5**. The selector cascade (theme → series → geography → breakdown → drill‑1 → drill‑2) is a reactive dependency graph, which `$derived` expresses directly. Bundles are small, and it's the closest mental model to Shiny reactives. (React works too, at the cost of more boilerplate around effect ordering, which is the very kind of bug `app.R` has a lot of comments about.)
 - **Charts:** **Apache ECharts**. It has animated transitions between views, a legend you can click to hide categories or hover to highlight them, `dataZoom` for long monthly series, a built‑in SVG/PNG export, an ARIA "decal" pattern fill (useful for Suppressed Residual), and a choropleth map, all in one library. Observable Plot is the more elegant static alternative but would need hand‑built interactivity.
 - **Popovers:** the native HTML **Popover API** with **Floating UI** for positioning (CSS anchor positioning isn't yet consistent across browsers).
-- **DuckDB:** `@duckdb/duckdb-wasm`, pinned to a version, bundles self‑hosted (avoids a CDN dependency and CSP issues), single‑threaded `eh` bundle (no COOP/COEP headers needed, so any static host works).
+- **Query engine (decided in Phase 0):**
+  - *Default:* `@duckdb/duckdb-wasm`, pinned to a version, bundles self‑hosted (avoids a CDN dependency and CSP issues), single‑threaded `eh` bundle. GitHub Pages can't set the COOP/COEP headers that multi‑threaded WASM needs, so single‑threaded is the only straightforward option there.
+  - *Challenger:* hyparquet plus a TypeScript aggregation module. It reads the same Parquet files, so choosing it changes only the query module.
+  - In both cases the first chart per theme comes from pre‑aggregated JSON and doesn't wait on the engine.
 
 ### Data export (`data-raw/10_export_web.R`)
 
@@ -99,8 +105,12 @@ web/  (Vite + TypeScript)
 4. Export `category_translations` and `SERIES_FACET_LABELS_FR` together as one translations table. Unlike `translate_vec()`, which runs a SQL query per call, the browser loads it once into a `Map`.
 5. Write `sources.json` from `build_source_lookup(manifest)`, keyed by the 8‑char hash.
 6. Write per‑series facts for the popups: year range, last‑updated date, contributing source tables, share of cells suppressed, stock vs flow, and the latest complete period (see §4, partial years).
-7. Write `manifest.json` with content hashes. Filenames get a hash suffix (`theme=permanent_residents/geo_level=National.3f9a1c.parquet`) so browsers and CDNs can cache them forever, and a data refresh is just a new manifest.
-8. Remove `immigration.duckdb` from what gets deployed. It stays a pipeline artifact.
+7. **Pre‑aggregate the entry points** with the existing R functions, so they're correct by construction:
+   - `landing.json`: one record per theme with the headline series, unit label, latest complete year, its total, the change from the previous year, the 2015–latest annual values for the sparkline, any caveat flag, and the data‑through month. Built with `build_series_plot_data()` on each theme's default series, National, Total, Annual.
+   - `views/<theme>.default.json`: exactly what the explorer plots on first opening each theme (default series and facet, National, the default granularity and year range, top 10). It includes category order, the residual, the takeaway‑sentence inputs and the source table IDs, so the first chart, its sentence and its citation need no query.
+   - Each file is a few KB and is listed with its hash in `manifest.json`. The default‑view JSON must match the live query exactly, so it is added to the golden tests: the query layer is run on the same parameters and asserted equal.
+8. Write `manifest.json` with content hashes. Filenames get a hash suffix (`theme=permanent_residents/geo_level=National.3f9a1c.parquet`) so browsers and CDNs can cache them forever, and a data refresh is just a new manifest.
+9. Remove `immigration.duckdb` from what gets deployed. It stays a pipeline artifact.
 
 ### Porting the query layer (R → SQL in TS)
 
@@ -308,10 +318,15 @@ Phases 3 and 4 can run in parallel once phase 2 is done.
 
 ### Phase 0 timing comparison
 
-Two layouts, measured the same way, so the decision rests on numbers from the browser rather than the native estimates above:
+Three contenders, measured the same way, so the decision rests on numbers from the browser rather than the native estimates above. A and B compare file layouts for DuckDB‑WASM. C tests whether the WASM engine is needed at all.
 
-- **A. Theme × geo_level files (proposed):** load `geo_level=National` into an in‑memory table, query it, then load PT on demand.
-- **B. One file per theme:** sorted by `geo_level` first with ~20k‑row row groups, queried with `read_parquet()` directly and no in‑memory table.
+- **A. DuckDB‑WASM, theme × geo_level files (proposed):** load `geo_level=National` into an in‑memory table, query it, then load PT on demand.
+- **B. DuckDB‑WASM, one file per theme:** sorted by `geo_level` first with ~20k‑row row groups, queried with `read_parquet()` directly and no in‑memory table.
+- **C. No database engine: hyparquet + TypeScript.** Read the same theme × geo_level files as A with [hyparquet](https://github.com/hyparam/hyparquet) (a dependency‑free Parquet reader of tens of KB, with zstd through its companion `hyparquet-compressors` package). Decode only the needed columns into typed arrays, then filter and aggregate in plain TypeScript: the stock and residual logic plus top‑N, about 150 lines. There's no worker boot and no table build.
+
+C has no engine to boot, so its "engine boot" row measures loading the hyparquet module. Its decode row covers Parquet into typed arrays, and its query row covers the TypeScript aggregation.
+
+To keep the comparison fair, the TypeScript aggregation in C has to pass the same golden‑file parity tests (§2) as the SQL in A and B before its timings count.
 
 **Test views:**
 1. Permanent residents, National, Immigration Category, Annual (the default view).
@@ -335,19 +350,31 @@ Each run uses a cold cache, then a warm cache (served from the HTTP cache and th
 - time to first chart
 - peak JS heap (Chrome) where available
 
-| Metric (median of 5) | A, view 1 | B, view 1 | A, view 2 | B, view 2 | A, view 3 | B, view 3 | A, view 4 | B, view 4 |
-|---|---|---|---|---|---|---|---|---|
-| Bytes fetched | | | | | | | | |
-| Fetch (ms) | | | | | | | | |
-| Decode / build (ms) | | | | | | | | |
-| Query (ms) | | | | | | | | |
-| Time to first chart (ms) | | | | | | | | |
+One table per condition (desktop, throttled, iPhone), each value the median of 5 runs:
 
-**Decision rule:** keep A unless B is within 100 ms of A on time to first chart for views 1 and 4 under throttling. If it is, prefer B for its simpler file layout. Either way, the query layer goes through a `loadView(theme, geoLevel)` function, so switching layouts later changes one module.
+| Metric | A·1 | B·1 | C·1 | A·2 | B·2 | C·2 | A·3 | B·3 | C·3 | A·4 | B·4 | C·4 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| JS + engine bytes | | | | | | | | | | | | |
+| Engine / module boot (ms) | | | | | | | | | | | | |
+| Data bytes fetched | | | | | | | | | | | | |
+| Fetch (ms) | | | | | | | | | | | | |
+| Decode / build (ms) | | | | | | | | | | | | |
+| Query / aggregate (ms) | | | | | | | | | | | | |
+| Time to first chart (ms) | | | | | | | | | | | | |
+
+(Columns are contender·view, e.g. C·4 is contender C on view 4.)
+
+**Decision rules,** applied to the throttled table:
+1. **Engine:** if C beats the better of A and B on time to first chart for views 1 and 4 by at least 300 ms, drop DuckDB‑WASM and build the query layer in TypeScript. DuckDB's remaining advantage would be SQL, not speed, and the app doesn't need ad‑hoc SQL today. Otherwise keep DuckDB‑WASM.
+2. **Layout (only if DuckDB is kept):** keep A unless B is within 100 ms of A on time to first chart for views 1 and 4. If it is, prefer B for its simpler file layout.
+
+Whichever wins, the UI only talks to a `loadView(theme, geoLevel)` / `queryView(params)` interface, so swapping the engine or layout later changes one module. The Parquet files, the golden tests and the URL state stay the same.
 
 ## 7. Risks and mitigations
 
-- **First‑load weight (DuckDB‑WASM ~3–4 MB):** selectors and landing cards render from JSON straight away, the engine loads in a worker, and long‑lived cache headers plus hashed filenames make repeat visits instant. If it's still a problem, a fallback is to precompute the default view per theme as JSON.
+- **First‑load weight (DuckDB‑WASM ~3–4 MB):** the landing cards and each theme's first chart render from pre‑aggregated JSON, and the engine loads in a worker while the user reads. Hashed filenames make repeat visits instant. If the engine is still too slow on the first control change, Phase 0's contender C removes it entirely.
+- **Pre‑aggregated JSON drifting from live queries:** the default views are generated by the R functions and asserted equal to the query layer in the golden tests, so a mismatch fails CI.
+- **Hand‑written aggregation (if C wins):** the logic lives in TypeScript rather than SQL, but it's held to the same parity suite. Bringing DuckDB back later for ad‑hoc queries would only change the query module.
 - **Silent logic drift from the R version:** the golden‑file parity suite in CI, regenerated with each data refresh.
 - **Safari/iOS memory:** keep about 4 (theme, geo_level) tables in memory and drop the least recently used. Total data is 2.8 MB, so the risk is low.
 - **Lag when switching geographic level:** the first switch to PT, CMA, CD or CSD fetches a new file. PT is prefetched when the browser is idle; the smaller levels are under 200 KB and show a skeleton while loading.
@@ -357,7 +384,8 @@ Each run uses a cold cache, then a warm cache (served from the HTTP cache and th
 ## 8. Decisions for you
 
 1. **Framework:** Svelte (recommended) or React.
-2. **Hosting:** GitHub Pages (simplest if the repo moves to GitHub) or Cloudflare Pages (better caching and headers).
-3. **Description authoring:** YAML in the repo (recommended) or an Excel sheet like `label_overrides.xlsx`.
-4. **Event annotations:** include them (needs your curation) or leave them out.
-5. **Old Shiny deployments** (shinyapps.io and Posit Connect Cloud): redirect them or keep them running.
+2. **Query engine:** DuckDB‑WASM or hyparquet + TypeScript. The Phase 0 numbers decide this. Your input is only needed if you want SQL kept regardless, e.g. for a future ad‑hoc query panel.
+3. **Hosting:** GitHub Pages (simplest if the repo moves to GitHub) or Cloudflare Pages (better caching and headers).
+4. **Description authoring:** YAML in the repo (recommended) or an Excel sheet like `label_overrides.xlsx`.
+5. **Event annotations:** include them (needs your curation) or leave them out.
+6. **Old Shiny deployments** (shinyapps.io and Posit Connect Cloud): redirect them or keep them running.
