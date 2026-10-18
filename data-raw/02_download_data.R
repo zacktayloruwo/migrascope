@@ -1,12 +1,15 @@
 # Download every resource listed in data-raw/manifest.csv into
 # data-raw/downloads/<dataset>/<resource_id>__<slug>.<ext>.
 #
-# Safe to re-run monthly: before touching the network, each resource's CKAN
-# `metadata_modified` timestamp (captured in the manifest as
-# `last_modified_ckan`) is compared against the value recorded the last time
-# it was successfully downloaded (data-raw/download_log.csv). If it's
-# unchanged and the local file still exists, the download is skipped
-# entirely. Otherwise the file is fetched to a temp path and hash-compared
+# Safe to re-run monthly: a download is skipped only if BOTH the resource's
+# CKAN `metadata_modified` timestamp (`last_modified_ckan` in the manifest)
+# AND the file's own HTTP Last-Modified header (one HEAD request) match what
+# was recorded the last time it was downloaded (data-raw/download_log.csv),
+# and the local file still exists. The HTTP check matters: in September 2026
+# IRCC replaced ~60 files in place without touching CKAN's timestamps, which
+# a CKAN-only check silently missed. A log from before `http_last_modified`
+# was recorded never skips, so the first run after this change re-fetches
+# everything once. Otherwise the file is fetched to a temp path and hash-compared
 # against the existing copy as a second safety net (CKAN's timestamp can lag
 # or a resource can be replaced without it changing), so re-running when
 # nothing has actually changed leaves your working tree untouched either way.
@@ -29,13 +32,29 @@ prior_state <- if (file.exists(prior_log_path)) {
   if (!"last_modified_ckan" %in% names(prior_raw)) {
     prior_raw$last_modified_ckan <- NA_character_
   }
+  if (!"http_last_modified" %in% names(prior_raw)) {
+    prior_raw$http_last_modified <- NA_character_
+  }
   prior_raw |>
     filter(.data$status != "error") |>
-    select("resource_id", "dest_file", "last_modified_ckan") |>
+    select("resource_id", "dest_file", "last_modified_ckan", "http_last_modified") |>
     distinct(.data$resource_id, .keep_all = TRUE)
 } else {
   tibble::tibble(resource_id = character(), dest_file = character(),
-                  last_modified_ckan = character())
+                  last_modified_ckan = character(), http_last_modified = character())
+}
+
+#' The file's HTTP Last-Modified header, or NA if the server doesn't send one
+#' (or the HEAD request fails - then the file is simply downloaded).
+http_last_modified <- function(url) {
+  tryCatch({
+    resp <- httr2::request(utils::URLencode(url)) |>
+      httr2::req_method("HEAD") |>
+      httr2::req_user_agent("canadian-immigration-statistics ingest pipeline") |>
+      httr2::req_timeout(30) |>
+      httr2::req_perform()
+    httr2::resp_header(resp, "last-modified") %||% NA_character_
+  }, error = function(e) NA_character_)
 }
 
 slugify <- function(x, max_chars = 80) {
@@ -53,13 +72,16 @@ download_one <- function(dataset, resource_id, table_name, format, url, last_mod
   dest_file <- fs::path(dest_dir, paste0(resource_id, "__", slugify(table_name)), ext = ext)
 
   prior <- prior_state |> filter(.data$resource_id == .env$resource_id)
+  http_lm <- http_last_modified(url)
   if (nrow(prior) == 1 && !is.na(prior$last_modified_ckan) &&
       identical(prior$last_modified_ckan, last_modified_ckan) &&
+      !is.na(prior$http_last_modified) && !is.na(http_lm) &&
+      identical(prior$http_last_modified, http_lm) &&
       fs::file_exists(prior$dest_file)) {
     return(tibble::tibble(
       dataset = dataset, resource_id = resource_id, table_name = table_name,
       dest_file = as.character(prior$dest_file), status = "skipped_unchanged",
-      last_modified_ckan = last_modified_ckan
+      last_modified_ckan = last_modified_ckan, http_last_modified = http_lm
     ))
   }
 
@@ -85,7 +107,7 @@ download_one <- function(dataset, resource_id, table_name, format, url, last_mod
     return(tibble::tibble(
       dataset = dataset, resource_id = resource_id, table_name = table_name,
       dest_file = as.character(dest_file), status = "error",
-      last_modified_ckan = last_modified_ckan
+      last_modified_ckan = last_modified_ckan, http_last_modified = http_lm
     ))
   }
 
@@ -104,7 +126,7 @@ download_one <- function(dataset, resource_id, table_name, format, url, last_mod
   tibble::tibble(
     dataset = dataset, resource_id = resource_id, table_name = table_name,
     dest_file = as.character(dest_file), status = status,
-    last_modified_ckan = last_modified_ckan
+    last_modified_ckan = last_modified_ckan, http_last_modified = http_lm
   )
 }
 
