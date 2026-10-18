@@ -10,7 +10,8 @@
 // helpers below reproduce each where R uses it.
 
 import type { SeriesFactsColumns } from './columns'
-import { GEO_UNIT_SEP, NA_LABEL, ORDINAL_COHORT_REGEX, OTHER, PROVINCE_ABBR, SUPPRESSED_RESIDUAL } from './constants'
+import { GEO_UNIT_SEP, NA_LABEL, ORDINAL_COHORT_REGEX, OTHER, PROVINCE_ABBR, PROVINCE_ORDER_WEST_TO_EAST,
+         SUPPRESSED_RESIDUAL } from './constants'
 
 export type Granularity = 'Annual' | 'Quarterly' | 'Monthly'
 
@@ -336,6 +337,22 @@ export function buildPlotData(cols: SeriesFactsColumns, p: ViewParams): PlotData
   }))
   if (p.displayAs === 'percent') rows = toPercentOfTotal(rows)
   return { categoryOrder, periodOrder, rows }
+}
+
+// ---- web-only ordering (not in the R app) ----------------------------------------------
+
+/**
+ * Province/Territory views list provinces west to east (British Columbia
+ * first, so it leads the legend and tops the stack) instead of by size. Any
+ * other categories ("Other", "not stated", Suppressed Residual) keep their
+ * order after the provinces. A display choice layered on top of
+ * buildPlotData(), so the R parity tests are unaffected.
+ */
+export function orderWestToEast(data: PlotData): PlotData {
+  const present = new Set(data.categoryOrder)
+  const provinces = PROVINCE_ORDER_WEST_TO_EAST.filter((p) => present.has(p))
+  const rest = data.categoryOrder.filter((c) => !provinces.includes(c))
+  return { ...data, categoryOrder: [...provinces, ...rest] }
 }
 
 // ---- list_series_breakdown_values() --------------------------------------------------

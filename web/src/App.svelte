@@ -2,7 +2,7 @@
   import { DataStore } from './query/loader'
   import { loadMeta, type DefaultView, type Meta } from './lib/meta'
   import { Explorer } from './lib/state.svelte'
-  import { I18n, themeLabel } from './lib/i18n'
+  import { I18n, formatDate, formatMonth, themeLabel } from './lib/i18n'
   import Header from './components/Header.svelte'
   import Controls from './components/Controls.svelte'
   import Chart from './components/Chart.svelte'
@@ -102,6 +102,17 @@
         <h1>{i18n.t('about_page_title', app.lang)}</h1>
         <!-- Rendered at build time from app/ABOUT*.md, which is part of this repo. -->
         {@html app.meta.aboutHtml[app.lang]}
+        {#if app.meta.dataPulled}
+          <p class="pulled">
+            {#if app.lang === 'fr'}
+              Données téléchargées du Portail du gouvernement ouvert le <strong>{formatDate(app.meta.dataPulled, 'fr')}</strong>;
+              elles couvrent la période jusqu’à <strong>{formatMonth(app.meta.dataThrough, 'fr')}</strong>.
+            {:else}
+              Data last pulled from the Open Government Portal on <strong>{formatDate(app.meta.dataPulled, 'en')}</strong>,
+              covering up to <strong>{formatMonth(app.meta.dataThrough, 'en')}</strong>.
+            {/if}
+          </p>
+        {/if}
       </article>
     {:else}
       <Controls {app} {i18n} />
@@ -112,7 +123,7 @@
             <button type="button" class="icon-button" onclick={toggleFullscreen}
                     aria-label={fullscreen ? (app.lang === 'fr' ? 'Quitter le plein écran' : 'Exit full screen')
                                            : (app.lang === 'fr' ? 'Plein écran' : 'Full screen')}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                    stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 {#if fullscreen}<path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
                 {:else}<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />{/if}
@@ -139,21 +150,22 @@
 {/if}
 
 <style>
-  .page { max-width: 1280px; margin: 0 auto; padding: 24px 24px 48px; display: flex; flex-direction: column; gap: 20px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; }
-  .chart-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-  .chart-card h1 { margin: 0; font-size: 22px; line-height: 1.3; }
+  .page { max-width: 1440px; margin: 0 auto; padding: 12px 20px 32px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; }
+  .chart-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .chart-card h1 { margin: 0; font-size: 18px; line-height: 1.3; }
   .chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
   .icon-button {
-    flex: none; width: 40px; height: 40px; border: 1px solid var(--border-strong); border-radius: 8px;
+    flex: none; width: 32px; height: 32px; border: 1px solid var(--border-strong); border-radius: 7px;
     background: var(--surface); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
   }
   .icon-button:hover { background: var(--primary-tint); color: var(--primary); }
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }
-  .note { margin: 0; font-size: 13px; color: var(--ink-3); }
+  .note { margin: 0; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
   .about { max-width: 860px; line-height: 1.65; }
-  .about h1 { margin-top: 0; font-size: 30px; }
+  .about h1 { margin-top: 0; font-size: 26px; }
+  .pulled { margin: 24px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: 14px; color: var(--ink-2); }
   .about :global(h3) { font-family: var(--font-display); font-weight: 400; font-size: 22px; }
   .about :global(h4) { font-size: 17px; margin-bottom: 4px; }
   @media (max-width: 640px) { .page { padding: 16px 12px 32px; } .card { padding: 16px; } }

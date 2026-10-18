@@ -19,7 +19,7 @@
   --down: #B3263F;
   --up: #1E6B3A;
   --focus: #E8506A;
-  --radius: 18px;
+  --radius: 14px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -28,8 +28,8 @@ body {
   background: var(--ground);
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 16px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.45;
 }
 a { color: var(--primary); }
 a:hover { color: var(--primary-hover); }

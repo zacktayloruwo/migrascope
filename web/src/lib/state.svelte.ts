@@ -13,7 +13,7 @@
 
 import type { SeriesFactsColumns } from '../query/columns'
 import { GEO_UNIT_SEP } from '../query/constants'
-import { buildPlotData, listBreakdownValues, sourceTableIds, type Granularity, type PlotData,
+import { buildPlotData, listBreakdownValues, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
          type ViewParams } from '../query/plotData'
 import { THEMES, type Lang } from './i18n'
 import type { DefaultView, Meta, SummaryRow } from './meta'
@@ -130,9 +130,13 @@ export class Explorer {
     }
   })
 
+  /** Every province/territory as its own category: shown west to east rather than by size. */
+  isProvinceView = $derived(this.params?.geoLevel === 'PT' && this.params.facet === 'Total' &&
+    this.params.geoUnitPrefix.length === 0)
+
   plotData = $derived.by((): PlotData | null => {
-    if (this.colsReady && this.params) return buildPlotData(this.cols!, this.params)
-    return this.pendingDefault()
+    const data = this.colsReady && this.params ? buildPlotData(this.cols!, this.params) : this.pendingDefault()
+    return data && this.isProvinceView ? orderWestToEast(data) : data
   })
 
   /** The theme's pre-aggregated view, if the current inputs are exactly the ones it was built for. */

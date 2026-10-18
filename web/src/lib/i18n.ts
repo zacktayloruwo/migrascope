@@ -75,6 +75,18 @@ export function formatNumber(n: number, lang: Lang, decimals = 0): string {
   }).format(n)
 }
 
+/** "2026-09-12" -> "September 12, 2026" / "12 septembre 2026" (parsed as a local date, no timezone shift). */
+export function formatDate(iso: string, lang: Lang): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Intl.DateTimeFormat(lang === 'fr' ? 'fr-CA' : 'en-CA', { dateStyle: 'long' }).format(new Date(y, m - 1, d ?? 1))
+}
+
+/** "2026-06" -> "June 2026" / "juin 2026" */
+export function formatMonth(ym: string, lang: Lang): string {
+  const [y, m] = ym.split('-').map(Number)
+  return new Intl.DateTimeFormat(lang === 'fr' ? 'fr-CA' : 'en-CA', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1))
+}
+
 export function formatPercent(n: number, lang: Lang): string {
   return lang === 'fr' ? `${formatNumber(n, lang, 1)} %` : `${formatNumber(n, lang, 1)}%`
 }

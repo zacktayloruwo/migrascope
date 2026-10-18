@@ -137,43 +137,43 @@
 <style>
   .card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 20px 24px; display: flex; flex-direction: column; gap: 16px;
+    padding: 12px 16px; display: flex; flex-direction: column; gap: 10px;
   }
   .sentence {
-    margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
-    font-size: 22px; line-height: 1.4;
+    margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+    font-size: 16px; line-height: 1.4;
   }
   .word { color: var(--ink-2); }
   .pill {
-    appearance: none; border: 0; border-radius: 8px; max-width: 100%;
-    background: var(--primary-tint) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%232348C4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
-    color: var(--primary); font-weight: 600; font-size: 20px;
-    padding: 4px 34px 4px 12px; cursor: pointer; text-overflow: ellipsis;
+    appearance: none; border: 0; border-radius: 7px; max-width: 100%;
+    background: var(--primary-tint) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%232348C4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center / 14px;
+    color: var(--primary); font-weight: 600; font-size: 15px;
+    padding: 3px 28px 3px 10px; cursor: pointer; text-overflow: ellipsis;
   }
   .pill:hover { background-color: #dde5ff; }
   .options {
-    display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-start;
-    border-top: 1px solid var(--border); padding-top: 14px; font-size: 14px;
+    display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-start;
+    border-top: 1px solid var(--border); padding-top: 10px; font-size: 13px;
   }
-  .group { display: flex; flex-direction: column; gap: 6px; }
-  .label { color: var(--ink-3); font-weight: 600; font-size: 13px; }
-  .hint { color: var(--ink-3); font-size: 12px; max-width: 360px; }
-  .segmented { display: flex; flex-wrap: wrap; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+  .group { display: flex; flex-direction: column; gap: 3px; }
+  .label { color: var(--ink-3); font-weight: 600; font-size: 12px; max-width: 220px; line-height: 1.3; }
+  .hint { color: var(--ink-3); font-size: 11px; max-width: 360px; }
+  .segmented { display: flex; flex-wrap: wrap; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
   .segmented button {
     border: 0; border-left: 1px solid var(--border-strong); background: var(--surface);
-    padding: 8px 12px; cursor: pointer; min-height: 40px;
+    padding: 4px 9px; cursor: pointer; min-height: 30px;
   }
   .segmented button:first-child { border-left: 0; }
   .segmented button[aria-pressed='true'] { background: var(--primary); color: #fff; font-weight: 600; }
   .segmented button:disabled { color: #8A93A2; background: #F4F2EE; cursor: not-allowed; }
   .years { display: flex; align-items: center; gap: 6px; }
   .years select, input[type='number'] {
-    border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 8px; background: var(--surface); min-height: 40px;
+    border: 1px solid var(--border-strong); border-radius: 7px; padding: 3px 6px; background: var(--surface); min-height: 30px;
   }
-  input[type='number'] { width: 72px; }
+  input[type='number'] { width: 60px; }
   @media (max-width: 640px) {
-    .card { padding: 16px; }
-    .sentence { font-size: 18px; }
-    .pill { font-size: 17px; }
+    .card { padding: 12px; }
+    /* Larger touch targets on phones. */
+    .segmented button, .years select, input[type='number'] { min-height: 40px; }
   }
 </style>

@@ -17,6 +17,8 @@ export interface PartitionEntry {
 export interface Manifest {
   built_at: string
   data_through: string
+  /** Date (YYYY-MM-DD) the source files were last downloaded from the Open Government Portal. */
+  data_pulled?: string
   n_tables: number
   series_facts: PartitionEntry[]
   files: { path: string; bytes: number; hash: string }[]

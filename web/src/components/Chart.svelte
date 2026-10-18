@@ -18,9 +18,9 @@
   } = $props()
 
   /**
-   * Category colours (docs/wasm-port-plan.md, 4.11). The first four were
-   * checked for colour-blind safety; the rest extend the set for top-N up to
-   * 15 and still need that check.
+   * Category colours (docs/wasm-port-plan.md, 4.11), assigned largest
+   * category first. The first four were checked for colour-blind safety; the
+   * rest extend the set for top-N up to 15 and still need that check.
    */
   const PALETTE = ['#2348C4', '#5BC0EB', '#E8506A', '#FFB627', '#6C3FB4', '#2E9E6B', '#B4621B', '#9DB2FF',
                    '#C2185B', '#7A9A01', '#0E6E8C', '#E89BB0', '#8C6D1F', '#4C5BA8', '#3FB8AF']
@@ -34,7 +34,12 @@
   const legend = $derived.by(() => {
     const hasNull = data.rows.some((r) => r.category === null)
     const stackOrder = [...(hasNull ? [NULL_KEY] : []), ...[...data.categoryOrder].reverse()]
+    // Colours go by size, largest first, so the four colour-blind-checked
+    // colours always land on the biggest categories, whatever the stack order.
+    const totals = new Map<string, number>()
+    for (const r of data.rows) if (r.category !== null) totals.set(r.category, (totals.get(r.category) ?? 0) + r.value)
     const ranked = stackOrder.filter((c) => c !== NULL_KEY && !(c in FIXED))
+      .sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0))
     const colour = (c: string) => (c === NULL_KEY ? FIXED[NA_LABEL] : FIXED[c] ?? PALETTE[ranked.indexOf(c) % PALETTE.length])
     const single = data.categoryOrder.length <= 1 && !hasNull
     const name = (c: string) => (c === NULL_KEY ? i18n.category(null, lang) : i18n.category(c, lang))
@@ -149,15 +154,17 @@
 {/if}
 
 <style>
-  .chart { width: 100%; height: clamp(300px, 55vh, 540px); }
+  /* Leaves room above for the header, controls and title, and below for the legend, on a laptop screen. */
+  /* overflow: hidden - ECharts parks its hidden tooltip off to the side, which otherwise widens the page. */
+  .chart { width: 100%; height: clamp(250px, calc(100vh - 400px), 560px); overflow: hidden; }
   .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 6px; justify-content: center; }
   .legend button {
     display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; cursor: pointer;
-    padding: 6px 8px; border-radius: 6px; font-size: 14px; color: var(--ink); min-height: 36px;
+    padding: 3px 7px; border-radius: 6px; font-size: 13px; color: var(--ink); min-height: 28px;
   }
   .legend button:hover { background: var(--primary-tint); }
   .legend button[aria-pressed='false'] { color: #8A93A2; text-decoration: line-through; }
   .legend button[aria-pressed='false'] .swatch { opacity: 0.35; }
-  .swatch { width: 14px; height: 14px; border-radius: 3px; flex: none; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
   .swatch.hatched { background-image: repeating-linear-gradient(135deg, #8E96A3 0 2px, transparent 2px 6px); }
 </style>

@@ -235,6 +235,18 @@ manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types =
 sources <- build_source_lookup(manifest_csv)
 write_json(sources, "sources.json")
 
+# ---- when the source data was last pulled ----------------------------------
+# 02_download_data.R stamps each run in download_log.csv (checked_at); logs
+# from before that column existed fall back to the log file's own mtime,
+# which is when that run wrote it.
+download_log <- readr::read_csv("data-raw/download_log.csv", show_col_types = FALSE,
+                                col_types = readr::cols(.default = "c"))
+data_pulled <- if ("checked_at" %in% names(download_log) && any(!is.na(download_log$checked_at))) {
+  substr(max(download_log$checked_at, na.rm = TRUE), 1, 10)
+} else {
+  format(file.mtime("data-raw/download_log.csv"), "%Y-%m-%d")
+}
+
 # ---- manifest ---------------------------------------------------------------
 json_files <- c("series_summary.json", "geo_units.json", "landing.json", "strings.json",
                 "sources.json", "about_en.html", "about_fr.html", sprintf("views/%s.default.json", names(default_views)),
@@ -242,6 +254,7 @@ json_files <- c("series_summary.json", "geo_units.json", "landing.json", "string
 write_json(list(
   built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
   data_through = sprintf("%d-%02d", data_through %/% 100, data_through %% 100),
+  data_pulled = data_pulled,
   n_tables = n_tables,
   series_facts = parquet_files,
   files = lapply(json_files, function(f) list(path = f, bytes = file.size(file.path(OUT_DIR, f)),

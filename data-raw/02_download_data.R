@@ -119,6 +119,9 @@ results <- purrr::pmap(
 cli::cli_h2("Summary")
 print(count(results, status))
 
+# When this pull ran - the web app's About page reports it
+# (data-raw/10_export_web.R reads the latest checked_at).
+results$checked_at <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z")
 readr::write_csv(results, "data-raw/download_log.csv")
 cli::cli_alert_info("Wrote data-raw/download_log.csv")
 

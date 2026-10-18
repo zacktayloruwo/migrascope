@@ -70,6 +70,7 @@ export interface Meta {
   translations: Translations
   aboutHtml: { en: string; fr: string }
   dataThrough: string
+  dataPulled: string | null
 }
 
 async function loadTranslations(store: DataStore): Promise<Translations> {
@@ -112,5 +113,5 @@ export async function loadMeta(store: DataStore): Promise<Meta> {
     store.manifest()
   ])
   return { summary, geoUnits, sources, strings, translations, aboutHtml: { en: aboutEn, fr: aboutFr },
-           dataThrough: manifest.data_through }
+           dataThrough: manifest.data_through, dataPulled: manifest.data_pulled ?? null }
 }
