@@ -74,10 +74,24 @@ catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 # needs it to content-check generic-fallback labels against `facts`) - disconnected
 # after that loop, near the bottom of this section.
 
-# No lookups passed in - these are the fresh, un-overridden "(auto)"
-# values, regardless of whatever "(custom)" overrides are already active
-# in label_overrides.xlsx or baked into `catalog` from a previous run.
-dim_map <- derive_theme_dimension_map(catalog)
+# The "(auto)" values must be the title-derived labels from
+# 05_build_duckdb.R, not level_N_label, which holds the previous run's baked
+# custom values. Those originals are saved in level_N_label_auto the first
+# time this runs on a fresh catalog. Without this, running 06 twice re-keyed
+# each custom label by its own output, so the next full rebuild (fresh auto
+# labels again) silently lost it (found when temporary_workers/520ac8e1's
+# "Program Level 2" -> "Program" override disappeared). Series labels are
+# unaffected: derive_series_label() works from the table title.
+level_label_cols <- paste0("level_", 1:5, "_label")
+for (col in level_label_cols) {
+  auto_col <- paste0(col, "_auto")
+  if (!auto_col %in% names(catalog)) catalog[[auto_col]] <- catalog[[col]]
+}
+catalog_auto <- catalog
+for (col in level_label_cols) catalog_auto[[col]] <- catalog_auto[[paste0(col, "_auto")]]
+
+# No lookups passed in - these are the fresh, un-overridden "(auto)" values.
+dim_map <- derive_theme_dimension_map(catalog_auto)
 
 manifest <- readr::read_csv("app/data/source_manifest.csv", show_col_types = FALSE,
                              col_types = readr::cols(last_modified_ckan = "c"))

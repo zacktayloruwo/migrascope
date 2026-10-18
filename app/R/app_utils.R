@@ -374,6 +374,17 @@ table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_
                    "period_month", "value") |>
     dplyr::collect()
 
+  # A row with no value in any breakdown column is a geography (or grand)
+  # total that true_leaf_rows() kept because it has no child rows - never a
+  # category of its own. Left in, it showed as a blank/"NA" category: small
+  # in most series (those amounts belong in the Suppressed Residual), but as
+  # large as the real categories combined in some tables (e.g.
+  # temporary_workers/d5779439's province totals inflated IMP "Program" by
+  # ~9%).
+  if (n_breakdown > 0) {
+    d <- d[rowSums(!is.na(d[breakdown_src_cols])) > 0, , drop = FALSE]
+  }
+
   if (length(geo_cols) >= 1) names(d)[seq_along(geo_cols)] <- paste0("geo_", seq_along(geo_cols))
 
   n_keep <- min(n_breakdown, MAX_BREAKDOWN_LEVELS)
