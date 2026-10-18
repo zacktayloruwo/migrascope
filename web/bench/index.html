@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MigraScope Phase 0 bench</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; color: #14213D; background: #FAF7F2; }
+  nav a { margin-right: 12px; }
+  table { border-collapse: collapse; margin-top: 12px; background: #fff; }
+  th, td { border: 1px solid #E7E1D6; padding: 6px 10px; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+</style>
+</head>
+<body>
+<h1>Phase 0 timing comparison</h1>
+<nav><a href="?c=A">A: DuckDB, theme × geo files</a><a href="?c=B">B: DuckDB, one file per theme</a><a href="?c=C">C: hyparquet + TS</a></nav>
+<div id="out">Running…</div>
+<script type="module" src="./bench.ts"></script>
+</body>
+</html>

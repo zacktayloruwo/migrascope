@@ -1,0 +1,318 @@
+{
+ "condition": "unthrottled",
+ "runs": 5,
+ "contenders": {
+  "A-first": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 412,
+    "fetchMs": 3,
+    "decodeMs": 636,
+    "queryMs": 30,
+    "totalMs": 1081,
+    "dataBytes": 148908
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 6,
+    "totalMs": 6,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 256,
+    "queryMs": 7,
+    "totalMs": 267,
+    "dataBytes": 412573
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 381,
+    "queryMs": 8,
+    "totalMs": 393,
+    "dataBytes": 547515
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 3,
+    "decodeMs": 108,
+    "queryMs": 4,
+    "totalMs": 114,
+    "dataBytes": 189528
+   }
+  ],
+  "B-first": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 404,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 525,
+    "totalMs": 932,
+    "dataBytes": 0
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 30,
+    "totalMs": 30,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 14,
+    "totalMs": 14,
+    "dataBytes": 0
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 24,
+    "totalMs": 24,
+    "dataBytes": 0
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 14,
+    "totalMs": 14,
+    "dataBytes": 0
+   }
+  ],
+  "C-first": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 14,
+    "fetchMs": 7,
+    "decodeMs": 114,
+    "queryMs": 10,
+    "totalMs": 145,
+    "dataBytes": 148908
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 9,
+    "totalMs": 9,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 3,
+    "decodeMs": 198,
+    "queryMs": 15,
+    "totalMs": 217,
+    "dataBytes": 412573
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 264,
+    "queryMs": 6,
+    "totalMs": 273,
+    "dataBytes": 547515
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 2,
+    "decodeMs": 77,
+    "queryMs": 9,
+    "totalMs": 89,
+    "dataBytes": 189528
+   }
+  ],
+  "A-repeat": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 390,
+    "fetchMs": 2,
+    "decodeMs": 281,
+    "queryMs": 30,
+    "totalMs": 704,
+    "dataBytes": 148908
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 5,
+    "totalMs": 5,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 256,
+    "queryMs": 6,
+    "totalMs": 265,
+    "dataBytes": 412573
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 379,
+    "queryMs": 8,
+    "totalMs": 391,
+    "dataBytes": 547515
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 2,
+    "decodeMs": 108,
+    "queryMs": 4,
+    "totalMs": 114,
+    "dataBytes": 189528
+   }
+  ],
+  "B-repeat": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 381,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 203,
+    "totalMs": 585,
+    "dataBytes": 0
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 30,
+    "totalMs": 30,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 14,
+    "totalMs": 14,
+    "dataBytes": 0
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 24,
+    "totalMs": 24,
+    "dataBytes": 0
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 14,
+    "totalMs": 14,
+    "dataBytes": 0
+   }
+  ],
+  "C-repeat": [
+   {
+    "step": "1 cold: PR National by category",
+    "checksum": "72/4076730",
+    "bootMs": 2,
+    "fetchMs": 2,
+    "decodeMs": 105,
+    "queryMs": 10,
+    "totalMs": 118,
+    "dataBytes": 148908
+   },
+   {
+    "step": "1 warm: same view again",
+    "checksum": "72/4076730",
+    "bootMs": 0,
+    "fetchMs": 0,
+    "decodeMs": 0,
+    "queryMs": 9,
+    "totalMs": 9,
+    "dataBytes": 0
+   },
+   {
+    "step": "4: switch PR to Province/Territory",
+    "checksum": "132/4076630",
+    "bootMs": 0,
+    "fetchMs": 3,
+    "decodeMs": 183,
+    "queryMs": 9,
+    "totalMs": 196,
+    "dataBytes": 412573
+   },
+   {
+    "step": "2: Study permits PT monthly (new theme)",
+    "checksum": "1499/4705300",
+    "bootMs": 0,
+    "fetchMs": 4,
+    "decodeMs": 284,
+    "queryMs": 6,
+    "totalMs": 294,
+    "dataBytes": 547515
+   },
+   {
+    "step": "3: PR one CSD (Toronto)",
+    "checksum": "12/779960",
+    "bootMs": 0,
+    "fetchMs": 3,
+    "decodeMs": 76,
+    "queryMs": 8,
+    "totalMs": 87,
+    "dataBytes": 189528
+   }
+  ]
+ }
+}

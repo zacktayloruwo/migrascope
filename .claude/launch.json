@@ -4,8 +4,26 @@
     {
       "name": "shiny-app",
       "runtimeExecutable": "Rscript",
-      "runtimeArgs": ["-e", "shiny::runApp('app', port = 8931, host = '127.0.0.1', launch.browser = FALSE)"],
+      "runtimeArgs": [
+        "-e",
+        "shiny::runApp('app', port = 8931, host = '127.0.0.1', launch.browser = FALSE)"
+      ],
       "port": 8931
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--prefix",
+        "web",
+        "vite",
+        "preview",
+        "web",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
     }
   ]
 }

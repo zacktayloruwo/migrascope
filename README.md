@@ -75,6 +75,8 @@ source("data-raw/05_build_duckdb.R")
 source("data-raw/06_build_label_lookups.R")
 source("data-raw/07_build_series_reference.R")
 source("data-raw/08_build_series_facts.R")
+source("data-raw/10_export_web.R")         # Parquet + JSON for the static web app (web/), see docs/wasm-port-plan.md
+source("data-raw/11_export_golden.R")      # golden files for the web app's parity tests (cd web && npm test)
 ```
 
 ``` sh

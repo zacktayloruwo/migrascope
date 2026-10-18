@@ -37,7 +37,7 @@ Per‑file sizes with the theme × geo_level split (zstd, sorted):
 | TR → PR transition | 16 KB | 56 KB | — | — | — |
 | Refugees | 12 KB | 8 KB | — | — | — |
 
-So the data download isn't really a problem. The **DuckDB‑WASM engine** (about 3–4 MB compressed for the `eh` bundle) is the largest thing the browser fetches. The design below works around that:
+So the data download isn't really a problem. The **DuckDB‑WASM engine** is by far the largest thing the browser would fetch: Phase 0 measured the 1.32.0 `eh` bundle at 34.2 MB raw, **7.8 MB gzipped**, plus a 0.77 MB worker. An earlier draft of this plan estimated 3–4 MB; that was wrong. The design below works around that:
 - Selectors are drawn from small JSON before DuckDB has finished loading.
 - Each **(theme, geo_level)** Parquet file is loaded into an in‑memory table the first time it's needed. Files are at most 528 KB, so there's no need for HTTP range reads.
 
@@ -92,10 +92,11 @@ web/  (Vite + TypeScript)
 - **UI framework:** **Svelte 5**. The selector cascade (theme → series → geography → breakdown → drill‑1 → drill‑2) is a reactive dependency graph, which `$derived` expresses directly. Bundles are small, and it's the closest mental model to Shiny reactives. (React works too, at the cost of more boilerplate around effect ordering, which is the very kind of bug `app.R` has a lot of comments about.)
 - **Charts:** **Apache ECharts**. It has animated transitions between views, a legend you can click to hide categories or hover to highlight them, `dataZoom` for long monthly series, a built‑in SVG/PNG export, an ARIA "decal" pattern fill (useful for Suppressed Residual), and a choropleth map, all in one library. Observable Plot is the more elegant static alternative but would need hand‑built interactivity.
 - **Popovers:** the native HTML **Popover API** with **Floating UI** for positioning (CSS anchor positioning isn't yet consistent across browsers).
-- **Query engine (decided in Phase 0):**
-  - *Default:* `@duckdb/duckdb-wasm`, pinned to a version, bundles self‑hosted (avoids a CDN dependency and CSP issues), single‑threaded `eh` bundle. GitHub Pages can't set the COOP/COEP headers that multi‑threaded WASM needs, so single‑threaded is the only straightforward option there.
-  - *Challenger:* hyparquet plus a TypeScript aggregation module. It reads the same Parquet files, so choosing it changes only the query module.
-  - In both cases the first chart per theme comes from pre‑aggregated JSON and doesn't wait on the engine.
+- **Query engine: hyparquet + TypeScript** (adopted 2026‑10‑18 after Phase 0; see "Phase 0 results").
+  - Decoding: `hyparquet` with `hyparquet-compressors` for zstd, about 94 KB gzipped together, compared with 7.8 MB for DuckDB‑WASM.
+  - Aggregation: plain TypeScript in `web/src/query/`.
+  - DuckDB‑WASM stays only as a dev dependency of the Phase 0 bench (`web/bench/`), for re‑running the comparison.
+  - The first chart per theme still comes from pre‑aggregated JSON.
 
 ### Data export (`data-raw/10_export_web.R`)
 
@@ -112,9 +113,31 @@ web/  (Vite + TypeScript)
 8. Write `manifest.json` with content hashes. Filenames get a hash suffix (`theme=permanent_residents/geo_level=National.3f9a1c.parquet`) so browsers and CDNs can cache them forever, and a data refresh is just a new manifest.
 9. Remove `immigration.duckdb` from what gets deployed. It stays a pipeline artifact.
 
-### Porting the query layer (R → SQL in TS)
+### Porting the query layer (R → TypeScript), done in Phase 1
 
-Push as much as possible into DuckDB SQL rather than re‑implementing dplyr in JS:
+With DuckDB dropped, the R functions are ported to plain TypeScript in `web/src/query/plotData.ts`. The functions loop over decoded column arrays, at most a few hundred thousand rows per partition. The table below records where each R function went. The SQL sketch after it is kept for reference only, in case DuckDB is ever brought back for ad‑hoc queries.
+
+| R function (`app/R/app_utils.R`) | TypeScript port |
+|---|---|
+| `build_series_summary()`, `list_series_geo_units()` | precomputed JSON (`10_export_web.R`) |
+| `fetch_series_rows()` | `fetchSeriesRows()` |
+| `aggregate_series()`, incl. stock latest month per entity | `aggregateSeries()` |
+| `fetch_series_published_total()` + Suppressed Residual | inside `buildPlotData()` |
+| `collapse_to_top_n()` | `collapseToTopN()` |
+| `order_categories()`, `is_ordinal_cohort()` | `orderCategories()`, `isOrdinalCohort()` |
+| `to_percent_of_total()` | `toPercentOfTotal()` |
+| `build_series_plot_data()` | `buildPlotData()` |
+| `list_series_breakdown_values()` | `listBreakdownValues()` |
+| `series_source_table_ids()` | `sourceTableIds()` |
+| `parse_geo_unit()`, `PROVINCE_ABBR`, `PROVINCE_ORDER_WEST_TO_EAST`, `GEO_UNIT_SEP` | `web/src/query/constants.ts` |
+| `translate_vec()`, `category_colors()`, `table_citation_ui()` | Phase 2 (UI) |
+
+**Ordering detail the port has to match:** dplyr's `group_by()` and `arrange()` sort strings in the C locale, while base R's `sort()` uses ICU collation for `en_CA`. The port reproduces each where R uses it: a plain comparison and `Intl.Collator('en-CA')` respectively.
+
+Original SQL plan, for reference:
+
+| R function (`app/R/app_utils.R`) | Port |
+|---|---|
 
 | R function (`app/R/app_utils.R`) | Port |
 |---|---|
@@ -157,9 +180,17 @@ All values go in as prepared‑statement parameters, never as interpolated strin
 
 The R logic has a lot of hard‑won edge cases: stock tables, NA quarters in pre‑2015 years, the residual being skipped when a drill is active, ordinal age cohorts, CD/CSD name collisions. To avoid re‑discovering them:
 
-1. Write `data-raw/11_export_golden.R`. It picks around 300 view configurations, stratified across every theme × geo_level × granularity × facet, plus every drill combination and both display modes. For each it runs the **existing** `build_series_plot_data()` and writes inputs and outputs to `web/tests/golden/*.json`.
-2. In `vitest`, run the TS query layer against the same Parquet using `@duckdb/node-api` (same SQL engine) and assert equal rows, category order, and values to 1e‑9.
-3. Run this in CI on every push. A pipeline refresh regenerates the golden files.
+1. `data-raw/11_export_golden.R` (done) runs the **existing** `build_series_plot_data()` over **605 view configurations** and writes inputs and outputs to `web/tests/golden/<theme>.json`. The configurations cover:
+   - every (theme, series, facet, geo_level) in `series_summary`, at every granularity it supports;
+   - non‑National levels both as "All" places and narrowed to one place;
+   - the first drill value at every depth;
+   - deterministic percentage, top‑3 and narrowed‑year variants.
+
+   It also writes 46 drill‑choice cases from `list_series_breakdown_values()`.
+2. `web/tests/parity.test.ts` (done, `npm test`) runs `buildPlotData()` against the exported Parquet and asserts category order, period order and every value to 1e‑9. It also checks that the 7 pre‑aggregated default views equal the live query.
+   - **Result: 658 of 658 pass.** The suite takes about 10 s.
+   - Planted bugs are caught: reversing the stock "latest month" rule fails 22 cases, an off‑by‑one in the residual fails 497, and dropping the stack‑order reversal fails 355.
+3. Run this in CI on every push, once the golden files and the exported data are available to CI (see open decisions). A data refresh reruns `10_export_web.R` then `11_export_golden.R`.
 
 ---
 
@@ -306,8 +337,8 @@ More than 4 categories need an extended palette checked the same way before use.
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
-| **0. Spike** (2–3 days) | Vite page boots DuckDB‑WASM from a static host, runs the stock and residual queries, draws one ECharts bar, and runs the timing comparison below | Comparison table filled in; layout decision recorded |
-| **1. Data export + golden tests** | `10_export_web.R`, `11_export_golden.R`, TS query layer, vitest parity suite | 100% of golden cases pass |
+| **0. Spike** ✅ (2–3 days) | Vite page boots DuckDB‑WASM from a static host, runs the stock and residual queries, draws one ECharts bar, and runs the timing comparison below | Comparison table filled in; layout decision recorded |
+| **1. Data export + golden tests** ✅ | `10_export_web.R`, `11_export_golden.R`, TS query layer, vitest parity suite | 100% of golden cases pass (658/658, 2026‑10‑18) |
 | **2. Parity app** | Full selector cascade, chart, citation, About, EN/FR, URL state | Parity checklist (§3) complete; side‑by‑side spot check against Shiny |
 | **3. ⓘ popups** | `InfoTip` component, `descriptions.yml` drafted for all themes/controls, coverage check | No missing `en` ids; FR drafted |
 | **4. Engagement features** | Sentence builder, click‑to‑drill and breadcrumbs, share/cite/download, YTD marking, takeaway line, palette | Usability pass with 2–3 colleagues or students |
@@ -370,9 +401,72 @@ One table per condition (desktop, throttled, iPhone), each value the median of 5
 
 Whichever wins, the UI only talks to a `loadView(theme, geoLevel)` / `queryView(params)` interface, so swapping the engine or layout later changes one module. The Parquet files, the golden tests and the URL state stay the same.
 
+### Phase 0 results (2026‑10‑18)
+
+**How it was run:**
+- Code: `web/bench/` (`bench.ts` and `index.html`), driven by `web/bench/run-bench.mjs`.
+- Browser: headless Chrome 152 on the development Mac, one fresh profile per run.
+- Server: serves the production build with gzip for JS, WASM and JSON (Parquet is already zstd), and supports HTTP Range for contender B.
+- Throttling: optional, applied at the server and shared across all responses, so the DuckDB worker's downloads are slowed too.
+- **First visit:** empty cache. **Repeat visit:** the engine comes from the disk cache. Data files are cache‑busted on every load.
+- Checksums of the plotted rows were identical across A, B and C for every step.
+- Raw medians are in `web/bench/results/*.json`.
+
+**Download sizes (production build):**
+
+| | DuckDB‑WASM (A, B) | hyparquet (C) |
+|---|---|---|
+| Engine / module | 34.2 MB `.wasm` (7.8 MB gzipped) + 0.77 MB worker + 48 KB JS glue | 62 KB + 114 KB JS (19 KB + 75 KB gzipped) |
+| Data for view 1 | 141 KB (A) / byte ranges of a 1.08 MB file (B) | 141 KB |
+
+Steps follow the bench session: view 1 cold, view 1 again (warm), view 4 (switch to PT), view 2 (new theme), view 3 (CSD drill). Medians are in ms; the "session" column is the five steps added together.
+
+*Unthrottled (5 runs):*
+
+| | View 1 cold | View 1 warm | View 4 | View 2 | View 3 | Session |
+|---|---|---|---|---|---|---|
+| A, first visit | 1,081 | 6 | 267 | 393 | 114 | 1,861 |
+| B, first visit | 932 | 30 | 14 | 24 | 14 | 1,014 |
+| **C, first visit** | **145** | 9 | 217 | 273 | 89 | **733** |
+| A, repeat visit | 704 | 5 | 265 | 391 | 114 | 1,479 |
+| B, repeat visit | 585 | 30 | 14 | 24 | 14 | 667 |
+| **C, repeat visit** | **118** | 9 | 196 | 294 | 87 | 704 |
+
+*Throttled to 9 Mbps and 60 ms latency, roughly a good 4G connection (3 runs):*
+
+| | View 1 cold | View 1 warm | View 4 | View 2 | View 3 | Session |
+|---|---|---|---|---|---|---|
+| A, first visit | 8,718 | 5 | 735 | 985 | 376 | 10,819 |
+| B, first visit | 9,378 | 30 | 14 | 1,231 | 19 | 10,672 |
+| **C, first visit** | **509** | 9 | 676 | 790 | 338 | **2,322** |
+| A, repeat visit | 908 | 6 | 723 | 985 | 376 | 2,998 |
+| B, repeat visit | 1,655 | 30 | 14 | 1,229 | 19 | 2,947 |
+| **C, repeat visit** | **342** | 9 | 650 | 793 | 332 | **2,126** |
+
+**What the numbers say:**
+- **The engine download dominates the first visit.** On 4G, DuckDB spends about 7.75 s booting, almost all of it downloading the 7.8 MB WASM, before it can answer anything. C's first chart arrives in about 0.5 s.
+- **Once data is loaded, everything is fast.** Queries take 5–30 ms for every contender.
+- **B's quick switches are an artifact of its file size.** B's first query pulled most of the 1.08 MB permanent residents file over HTTP ranges, so later views of that theme were already local (14–19 ms). The cost moved into view 1, not away.
+- **C's switch cost is fetch plus JavaScript decode.** On 4G that's about 440 ms to fetch the PT file and about 200 ms to decode it in JS (DuckDB decodes the same file in about 280 ms). Prefetching PT when the browser is idle, which the loading strategy already includes, hides most of this.
+
+**Decision rules applied:**
+- **Rule 1** asks whether C beats the better of A and B on time to first chart by at least 300 ms for views 1 and 4 under throttling.
+  - View 1: met by a wide margin. C takes 509 ms; the best of A and B takes 8,718 ms.
+  - View 4: **not met** as written. B takes 14 ms and C 676 ms, but only because B had already downloaded the theme while taking 9.4 s over view 1.
+  - Across the whole session, C is about 8.3 s faster on a first visit and about 0.8 s faster on a repeat visit.
+- **Rule 2** (layout) only applies if DuckDB is kept.
+
+**Recommendation: adopt C (hyparquet + TypeScript) and drop DuckDB‑WASM.** Rule 1 as written didn't anticipate B front‑loading a whole theme during view 1. On the measure the rule was meant to protect (how long people wait), C wins every first‑visit and repeat‑visit session, on every connection tested. Keep the theme × geo_level layout (A's files, which C also reads).
+
+**Not yet covered:**
+- A real iPhone in Safari.
+- CPU slowdown. Chrome's CPU throttling applies to the page, not to DuckDB's worker, so it couldn't be applied fairly. C should move its decoding into a worker in production anyway, and then both can be throttled the same way.
+
+Repeating this on an iPhone, by opening `/bench/?c=A`, `?c=C` etc. from a phone on the same network, is a 15‑minute check before Phase 2.
+
 ## 7. Risks and mitigations
 
-- **First‑load weight (DuckDB‑WASM ~3–4 MB):** the landing cards and each theme's first chart render from pre‑aggregated JSON, and the engine loads in a worker while the user reads. Hashed filenames make repeat visits instant. If the engine is still too slow on the first control change, Phase 0's contender C removes it entirely.
+- **First‑load weight (DuckDB‑WASM 7.8 MB gzipped; see Phase 0 results):** the landing cards and each theme's first chart render from pre‑aggregated JSON, and the engine loads in a worker while the user reads. Hashed filenames make repeat visits instant. If the engine is still too slow on the first control change, Phase 0's contender C removes it entirely.
 - **Pre‑aggregated JSON drifting from live queries:** the default views are generated by the R functions and asserted equal to the query layer in the golden tests, so a mismatch fails CI.
 - **Hand‑written aggregation (if C wins):** the logic lives in TypeScript rather than SQL, but it's held to the same parity suite. Bringing DuckDB back later for ad‑hoc queries would only change the query module.
 - **Silent logic drift from the R version:** the golden‑file parity suite in CI, regenerated with each data refresh.
@@ -384,8 +478,9 @@ Whichever wins, the UI only talks to a `loadView(theme, geoLevel)` / `queryView(
 ## 8. Decisions for you
 
 1. **Framework:** Svelte (recommended) or React.
-2. **Query engine:** DuckDB‑WASM or hyparquet + TypeScript. The Phase 0 numbers decide this. Your input is only needed if you want SQL kept regardless, e.g. for a future ad‑hoc query panel.
+2. ~~**Query engine**~~: decided 2026‑10‑18, hyparquet + TypeScript.
 3. **Hosting:** GitHub Pages (simplest if the repo moves to GitHub) or Cloudflare Pages (better caching and headers).
 4. **Description authoring:** YAML in the repo (recommended) or an Excel sheet like `label_overrides.xlsx`.
 5. **Event annotations:** include them (needs your curation) or leave them out.
 6. **Old Shiny deployments** (shinyapps.io and Posit Connect Cloud): redirect them or keep them running.
+7. **Data in git:** `web/public/data/` (2.9 MB of Parquet plus JSON) and `web/tests/golden/` (11 MB) are derived from the gitignored database, but CI and GitHub Pages need them. Options: commit them on each refresh, or publish them from a release step. Committing is simplest; the golden files could be gzipped.
