@@ -116,16 +116,23 @@ GENERIC_FALLBACK_LABEL_REGEX <- "^(Category|Program) Level \\d+$"
 #' GENERIC_FALLBACK_LABEL_REGEX matches.
 FILLER_LEVEL_REGEX <- paste0(GENERIC_FALLBACK_LABEL_REGEX, "|\\bRank$")
 
+#' A French-language twin of another level ("Gender  Fr Label") - see classify_level().
+FR_TWIN_LABEL_REGEX <- "\\bFr\\s+Label$"
+
 #' Classify a table's level_N_label vector (in level order, NAs already
 #' dropped by the caller) for the Geographic Aggregation / Break down by
 #' selectors: for each label, is it geographic (and at what rank), or a
 #' meaningless filler, or a real non-geographic category. Returns a
 #' data.frame aligned by position with the input.
 classify_level <- function(label) {
+  # French twins of an English level (flat CSVs carry e.g. "Province
+  # Territory  Fr Label" alongside "Province Territory") mirror that level
+  # one-to-one: never a geography of their own, never a breakdown.
+  is_fr_twin <- grepl(FR_TWIN_LABEL_REGEX, label, ignore.case = TRUE)
   data.frame(
     label = label,
-    geo_rank = classify_geo_rank(label),
-    is_filler = grepl(FILLER_LEVEL_REGEX, label, ignore.case = TRUE),
+    geo_rank = ifelse(is_fr_twin, NA_character_, classify_geo_rank(label)),
+    is_filler = grepl(FILLER_LEVEL_REGEX, label, ignore.case = TRUE) | is_fr_twin,
     stringsAsFactors = FALSE
   )
 }
@@ -188,7 +195,14 @@ MAX_LEVELS_IN_FACTS <- 5
 true_leaf_rows <- function(con, table_id, n_levels) {
   n_levels <- min(n_levels, MAX_LEVELS_IN_FACTS)
   base <- dplyr::tbl(con, "facts") |> dplyr::filter(.data$table_id == !!table_id)
-  leaves <- base |> dplyr::filter(.data$row_level >= !!n_levels)
+  # The grand-total row (level_1 empty) sits at row_level 1, so for a
+  # one-level table it passed the row_level filter and showed up as a blank
+  # category as large as all the real ones combined (found in
+  # permanent_residents/a57b1d07, French-speaking PRs by country of
+  # citizenship, which doubled that series' country breakdown).
+  leaves <- base |>
+    dplyr::filter(.data$row_level >= !!n_levels,
+                  !(is.na(.data$level_1) & dplyr::coalesce(.data$is_row_subtotal, FALSE)))
 
   if (n_levels > 1) {
     for (k in seq(n_levels - 1, 1)) {

@@ -299,8 +299,10 @@ export class Explorer {
     if (gran && this.granularityChoices.includes(gran)) this.granularity = gran
     const y = p.get('y')?.match(/^(\d{4})-(\d{4})$/)
     if (y) this.setYears(Number(y[1]), Number(y[2]))
-    if (p.get('pct') === '1' && this.percentAllowed) this.displayAs = 'percent'
+    // Settings the link leaves out go back to their defaults rather than
+    // keeping whatever this tab last showed.
+    this.displayAs = p.get('pct') === '1' && this.percentAllowed ? 'percent' : 'absolute'
     const n = Number(p.get('n'))
-    if (Number.isInteger(n) && n >= 2 && n <= 15) this.topN = n
+    this.topN = Number.isInteger(n) && n >= 2 && n <= 15 ? n : 10
   }
 }

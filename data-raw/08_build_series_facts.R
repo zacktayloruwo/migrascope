@@ -70,6 +70,48 @@ con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)
 catalog <- tbl(con, "catalog") |> collect() |> split_temporary_workers()
 dim_map <- build_theme_dimension_map(catalog)
 
+#' A level only counts as Province/Territory if its values really are
+#' provinces. Level labels are guessed from table titles (guess_level_labels()
+#' in R/duckdb_utils.R), and a workbook titled "... by Province/Territory and
+#' Immigration Category" can contain a sheet with no province level at all:
+#' permanent_residents/d839c522's "Pr Immcat" sheet starts at Immigration
+#' Category, so its categories (Economic, Sponsored Family, ...) ended up in
+#' geo_1 and showed as "places". Checked against the level's actual values:
+#' at least half its distinct values must be province/territory names (or a
+#' "not stated"-type placeholder). A level that fails is demoted to a
+#' category, and since the title guess assumed one level too many, the labels
+#' from that position down shift up by one (its own label becomes the next
+#' level's, e.g. "Immigration Category").
+PT_NAMES <- names(PROVINCE_ABBR)
+verify_pt_levels <- function(dim_map) {
+  for (i in seq_len(nrow(dim_map))) {
+    cl <- dim_map$classification[[i]]
+    for (j in which(cl$geo_rank %in% "PT")) {
+      col <- paste0("level_", cl$level_index[j])
+      vals <- dbGetQuery(con, sprintf("SELECT DISTINCT %s AS v FROM facts WHERE table_id = ? AND %s IS NOT NULL", col, col),
+                         params = list(dim_map$table_id[i]))$v
+      looks_like_pt <- vals %in% PT_NAMES | grepl("not stated|unknown|outside canada", vals, ignore.case = TRUE)
+      if (length(vals) == 0 || mean(looks_like_pt) >= 0.5) next
+
+      cli::cli_alert_warning(
+        "{dim_map$table_id[i]}: level {cl$level_index[j]} ({cl$label[j]}) holds no provinces - treated as a category")
+      n <- nrow(cl)
+      shifted <- c(cl$label[seq_len(j - 1)], cl$label[-seq_len(j)], paste("Category Level", cl$level_index[n]))
+      fresh <- classify_level(shifted)
+      cl$label <- shifted
+      cl$geo_rank <- fresh$geo_rank
+      cl$geo_rank[j] <- NA_character_
+      cl$is_filler <- fresh$is_filler
+      cl$label_normalized <- normalize_category_label(shifted)
+    }
+    dim_map$classification[[i]] <- cl
+    dim_map$geo_ranks[[i]] <- unique(stats::na.omit(cl$geo_rank))
+    dim_map$categories[[i]] <- unique(cl$label_normalized[is.na(cl$geo_rank) & !cl$is_filler])
+  }
+  dim_map
+}
+dim_map <- verify_pt_levels(dim_map)
+
 #' This table's own geographic level positions and (if any) facet name/
 #' positions, from its precomputed `classification` (see
 #' build_theme_dimension_map()). Returns *positions* (`geo_positions`/
@@ -226,6 +268,30 @@ merge_max <- function(pieces, key_cols) {
     ungroup()
 }
 
+#' table_geo_subtotals() returns level_1..level_idx as geo_1..geo_idx, which
+#' assumes every level above the geography is itself geographic. Some tables
+#' nest places under a category instead - "Asylum Claimants by Claim Office
+#' Type, Province/Territory" (Airport/Border/Inland > province) or the "Top 25
+#' Countries of Citizenship" family (country > province) - and those
+#' categories leaked into the geo columns, so each province appeared once per
+#' office type alongside its real total (double-counted, and listed three
+#' times in the Geographic unit picker). Here any non-geographic level above
+#' the geography is summed out, leaving one candidate total per place that
+#' merge_max() then weighs against the series' other tables as usual.
+sum_out_non_geo_levels <- function(d, cl, idx) {
+  if (idx < 1) return(d)
+  ranks <- cl$geo_rank[match(seq_len(idx), cl$level_index)]
+  non_geo <- which(is.na(ranks))
+  if (length(non_geo) == 0) return(d)
+  keep <- setdiff(seq_len(idx), non_geo)
+  d <- d[, setdiff(names(d), paste0("geo_", non_geo)), drop = FALSE]
+  names(d)[match(paste0("geo_", keep), names(d))] <- paste0("geo_", seq_along(keep))
+  geo_cols <- paste0("geo_", seq_along(keep))
+  d |>
+    group_by(across(all_of(c(geo_cols, "period_year", "period_quarter", "period_month")))) |>
+    summarise(value = if (all(is.na(.data$value))) NA_real_ else sum(.data$value, na.rm = TRUE), .groups = "drop")
+}
+
 build_total_rows <- function(members, geo_rank, geo_level_idx_lookup) {
   # geo_rank is "National" (geo_level_idx 0, every member qualifies) or one
   # of PT/CMA/CD/CSD (only members whose own geo_ranks include it)
@@ -239,6 +305,7 @@ build_total_rows <- function(members, geo_rank, geo_level_idx_lookup) {
     }
     d <- table_geo_subtotals(con, m$table_id, idx, m$has_month)
     if (nrow(d) == 0) return(NULL)
+    d <- sum_out_non_geo_levels(d, m$classification[[1]], idx)
     d$source_table_id <- m$table_id
     d$is_stock <- isTRUE(m$is_stock)
     d
