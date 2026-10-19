@@ -15,6 +15,7 @@ import type { SeriesFactsColumns } from '../query/columns'
 import { GEO_UNIT_SEP } from '../query/constants'
 import { buildPlotData, listBreakdownValues, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
          type ViewParams } from '../query/plotData'
+import { partialPeriods, type PartialPeriod } from '../query/partial'
 import { THEMES, type Lang } from './i18n'
 import type { DefaultView, Meta, SummaryRow } from './meta'
 
@@ -155,6 +156,10 @@ export class Explorer {
   }
 
   /** Source tables behind the current view (app.R: series_source_table_ids()). */
+  /** Plotted periods with incomplete data (e.g. 2026 to July): asterisked and described in the Note. */
+  partial = $derived.by((): PartialPeriod[] =>
+    this.colsReady && this.params ? partialPeriods(this.cols!, this.params, this.meta.dataThrough) : [])
+
   sourceIds = $derived.by(() => {
     if (!this.colsReady || !this.scope) return { view: [] as string[], series: [] as string[] }
     return { view: sourceTableIds(this.cols!, this.series, this.scope.facet), series: sourceTableIds(this.cols!, this.series) }

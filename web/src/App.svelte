@@ -75,6 +75,63 @@
   })
   $effect(() => { if (app) document.documentElement.lang = app.lang })
 
+  /**
+   * Keep each About heading in the same column as the text under it. Chrome
+   * ignores break-after: avoid inside CSS columns, so a heading could end a
+   * column with its text at the top of the next. Each heading is wrapped with
+   * the paragraph that follows (or, for a list, just its first item, so long
+   * lists can still flow across columns) in a block columns can't split.
+   */
+  function keepHeadingsWithText(html: string): string {
+    const doc = new DOMParser().parseFromString(`<div>${html}</div>`, 'text/html')
+    const root = doc.body.firstElementChild!
+    for (const heading of [...root.querySelectorAll('h3, h4')]) {
+      const next = heading.nextElementSibling
+      const keep = doc.createElement('div')
+      keep.className = 'keep'
+      heading.before(keep)
+      keep.append(heading)
+      if (!next) continue
+      if ((next.tagName === 'UL' || next.tagName === 'OL') && next.firstElementChild) {
+        const lead = doc.createElement(next.tagName.toLowerCase())
+        lead.className = 'lead'
+        lead.append(next.firstElementChild)
+        keep.append(lead)
+      } else {
+        keep.append(next)
+      }
+    }
+    return root.innerHTML
+  }
+  const aboutHtml = $derived(app && i18n ? keepHeadingsWithText(app.meta.aboutHtml[app.lang]) : '')
+
+  /**
+   * The Note's first sentence when some plotted periods are incomplete, e.g.
+   * "* Partial periods: 2026 covers January–July." - the asterisk matches the
+   * one the chart draws above those bars. Stock
+   * series show a single month's snapshot, so they name that month instead.
+   */
+  const partialNote = $derived.by(() => {
+    if (!app || !app.partial.length) return ''
+    const l = app.lang
+    const month = (m: number) => new Intl.DateTimeFormat(l === 'fr' ? 'fr-CA' : 'en-CA', { month: 'long' })
+      .format(new Date(2000, m - 1, 1))
+    const stock = app.scope?.is_stock
+    const parts = app.partial.map((p) => {
+      if (!p.months) {
+        return l === 'fr' ? `${p.period} ne comprend que les données publiées à ce jour` : `${p.period} includes only data published to date`
+      }
+      const [a, b] = p.months
+      if (stock) {
+        return l === 'fr' ? `${p.period} présente ${month(b)}, le dernier mois disponible` : `${p.period} shows ${month(b)}, the latest month available`
+      }
+      if (a === b) return l === 'fr' ? `${p.period} couvre ${month(a)} seulement` : `${p.period} covers ${month(a)} only`
+      return l === 'fr' ? `${p.period} couvre ${month(a)} à ${month(b)}` : `${p.period} covers ${month(a)}–${month(b)}`
+    })
+    const lead = l === 'fr' ? 'Périodes partielles : ' : 'Partial periods: '
+    return `${lead}${parts.join(l === 'fr' ? ' ; ' : '; ')}.`
+  })
+
   /** app.R: output$plot_title */
   const title = $derived.by(() => {
     if (!app || !i18n || !app.scope || !app.params) return ''
@@ -101,7 +158,7 @@
       <article class="card about">
         <h1>{i18n.t('about_page_title', app.lang)}</h1>
         <!-- Rendered at build time from app/ABOUT*.md, which is part of this repo. -->
-        <div class="about-text">{@html app.meta.aboutHtml[app.lang]}</div>
+        <div class="about-text">{@html aboutHtml}</div>
         {#if app.meta.dataPulled}
           <p class="pulled">
             {#if app.lang === 'fr'}
@@ -139,9 +196,12 @@
           <p class="message">{i18n.t('no_data', app.lang)}</p>
         {:else}
           <Chart data={app.plotData} lang={app.lang} {i18n} granularity={app.params?.granularity ?? 'Annual'}
-                 percent={app.params?.displayAs === 'percent'} />
+                 percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)} />
         {/if}
-        <p class="note">{i18n.t('suppression_note', app.lang)}</p>
+        <p class="note">
+          {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}
+          {i18n.t('suppression_note', app.lang)}
+        </p>
         <Citation viewIds={app.sourceIds.view} seriesIds={app.sourceIds.series} sources={app.meta.sources}
                   lang={app.lang} {i18n} />
       </section>
@@ -162,13 +222,16 @@
   .icon-button:hover { background: var(--primary-tint); color: var(--primary); }
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }
+  .partial-note { display: block; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+  .partial-mark { font-size: 15px; font-weight: 700; margin-right: 4px; }
   .note { margin: 0; font-weight: 400; font-size: 12px; line-height: 1.35; color: var(--ink-2); }
   /* Fills the window below the header; text flows into a second column once there's room for two readable ones. */
   .about { min-height: calc(100vh - 88px); line-height: 1.4; display: flex; flex-direction: column; }
   .about h1 { margin: 0 0 8px; font-size: 24px; }
   .about-text { columns: 2 34em; column-gap: 48px; column-rule: 1px solid var(--border); flex: 1; }
   .about-text :global(:first-child) { margin-top: 0; }
-  .about-text :global(h4) { break-after: avoid; }
+  .about-text :global(.keep) { break-inside: avoid; }
+  .about-text :global(.keep > ul.lead) { margin-bottom: 0.25em; }
   .about-text :global(li), .about-text :global(p) { break-inside: avoid; }
   .about-text :global(p) { margin: 0 0 0.6em; }
   .about-text :global(ul) { margin: 0 0 0.6em; padding-left: 1.2em; }
