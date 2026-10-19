@@ -32,6 +32,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 
 - IRCC/CISR censurent (« -- ») toute valeur de cellule entre 0 et 5 pour protéger la vie privée des personnes. Les cellules censurées sont exclues des sommes, donc les totaux peuvent être légèrement sous-estimés, et probablement plus encore pour les tableaux finement répartis (p. ex. par pays) que pour les tableaux plus généraux (p. ex. par province), puisque les tableaux plus fins comptent beaucoup plus de petites cellules à censurer. Dans certains cas, la censure réduit le total global de jusqu'à 13 %.
 - IRCC arrondit les valeurs publiées au multiple de 5; les nombres de décisions de la CISR ne sont pas arrondis.
+- Exception : IRCC publie le tableau des adoptions (Résidents permanents › Adoptions par la résidence permanente) sans arrondi ni censure; il comprend donc des effectifs exacts de 1 à 4.
 - La citation sous chaque graphique nomme le ou les tableaux sources originaux, la date de leur dernière mise à jour par IRCC/CISR et la date de votre consultation.
 
 #### Source

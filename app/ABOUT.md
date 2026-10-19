@@ -32,6 +32,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 - IRCC/IRB suppress ("--") any cell value between 0 and 5 to protect individual privacy. Suppressed cells are excluded from sums, so totals may be slightly understated, likely more so for finely broken-down tables (e.g. by country) than coarser ones (e.g. by province), since finer tables have many more small cells to suppress. In some cases, suppression lowers the overall total by as much as 13%.
 - IRCC rounds its published values to multiples of 5; IRB's refugee decision counts are not rounded.
+- Exception: IRCC publishes the adoptions table (Permanent Residents › Adoptions via PR) without rounding or suppression, so it includes exact counts from 1 to 4.
 - The citation under each chart names the original source table(s), when IRCC/IRB last updated them, and when you accessed them.
 
 #### Source

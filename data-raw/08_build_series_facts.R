@@ -112,6 +112,18 @@ verify_pt_levels <- function(dim_map) {
 }
 dim_map <- verify_pt_levels(dim_map)
 
+# Percentage tables (facts.is_percent, set when the source's values are
+# shares - e.g. "Percentage of French-speaking Permanent Residents") hold
+# rates, not counts, so they can't be summed or merged with count tables.
+# They used to feed the official-language series as if 0.0037 were a count,
+# and one was mis-flagged as a stock table (docs/data-audit-2026-10-18.md,
+# finding B).
+percent_tables <- dbGetQuery(con, "SELECT DISTINCT table_id FROM facts WHERE is_percent")$table_id
+if (length(percent_tables) > 0) {
+  cli::cli_alert_info("Excluding {length(percent_tables)} percentage table(s): {basename(percent_tables)}")
+  dim_map <- dim_map[!dim_map$table_id %in% percent_tables, , drop = FALSE]
+}
+
 #' This table's own geographic level positions and (if any) facet name/
 #' positions, from its precomputed `classification` (see
 #' build_theme_dimension_map()). Returns *positions* (`geo_positions`/
@@ -303,7 +315,7 @@ build_total_rows <- function(members, geo_rank, geo_level_idx_lookup) {
       if (!(geo_rank %in% unlist(m$geo_ranks))) return(NULL)
       idx <- geo_level_idx_lookup(m$classification[[1]], geo_rank)
     }
-    d <- table_geo_subtotals(con, m$table_id, idx, m$has_month)
+    d <- table_geo_subtotals(con, m$table_id, idx, m$has_month, isTRUE(m$is_stock))
     if (nrow(d) == 0) return(NULL)
     d <- sum_out_non_geo_levels(d, m$classification[[1]], idx)
     d$source_table_id <- m$table_id
@@ -422,7 +434,8 @@ build_facet_rows <- function(members) {
     pieces <- lapply(idx_tables, function(i) {
       m <- members[i, ]
       s <- shapes[[i]]
-      d <- table_facet_leaf_rows(con, m$table_id, m$n_levels, s$geo_positions, s$facet_positions, m$has_month)
+      d <- table_facet_leaf_rows(con, m$table_id, m$n_levels, s$geo_positions, s$facet_positions, m$has_month,
+                                 isTRUE(m$is_stock))
       if (nrow(d) == 0) return(NULL)
       if (s$n_facet_levels > MAX_BREAKDOWN_LEVELS) {
         cli::cli_alert_warning("{m$table_id}: facet '{fname}' has {s$n_facet_levels} levels, capping at {MAX_BREAKDOWN_LEVELS}")
@@ -493,6 +506,86 @@ series_facts <- bind_rows(purrr::compact(results))
 # never mixed within a single query result, since each contributing fetch
 # was already filtered to has_month's own single period_type_filter)
 series_facts$period_type <- ifelse(!is.na(series_facts$period_month), "month", "year")
+
+#' IRCC changes capitalisation and spacing between years ("Study level not
+#' stated" / "Study Level not stated", "Province/territory not stated" /
+#' "Province / Territory not stated"), which split one category into two
+#' legend entries across a multi-year chart (docs/data-audit-2026-10-18.md,
+#' finding D). Within a theme, labels that differ only by letter case or
+#' whitespace are unified to the spelling used in the most recent year.
+#' Accents and punctuation still distinguish labels - "Saint-Simon" and
+#' "Saint-Siméon", "St. Mary's" and "St. Marys" are different places.
+unify_spellings <- function(sf, cols) {
+  for (col in cols) {
+    vals <- sf[!is.na(sf[[col]]), c("theme", col, "period_year")]
+    names(vals)[2] <- "label"
+    canon <- vals |>
+      mutate(key = tolower(gsub("\\s+", "", .data$label))) |>
+      group_by(.data$theme, .data$key, .data$label) |>
+      summarise(last_year = max(.data$period_year), n = n(), .groups = "drop") |>
+      group_by(.data$theme, .data$key) |>
+      filter(n_distinct(.data$label) > 1) |>
+      arrange(desc(.data$last_year), desc(.data$n), .by_group = TRUE) |>
+      mutate(canonical = first(.data$label)) |>
+      ungroup() |>
+      filter(.data$label != .data$canonical)
+    if (nrow(canon) == 0) next
+    cli::cli_alert_info("{col}: unified {nrow(canon)} spelling variant(s), e.g. '{canon$label[1]}' -> '{canon$canonical[1]}'")
+    idx <- match(paste(sf$theme, sf[[col]]), paste(canon$theme, canon$label))
+    sf[[col]][!is.na(idx)] <- canon$canonical[idx[!is.na(idx)]]
+  }
+  sf
+}
+series_facts <- unify_spellings(series_facts, c("geo_1", "geo_2", "geo_3", "breakdown_1", "breakdown_2", "breakdown_3"))
+
+# Two sibling tables can report the same cell under different spellings
+# (e.g. 5582034d's "Province/Territory not stated" and 2aa5b7eb's
+# "Province/territory not stated"), which merge_max() couldn't match, so
+# both were kept and the cell counted twice. Now that spellings agree,
+# resolve them by the same rule as every other sibling merge: keep the
+# larger value.
+key_cols <- c("theme", "series", "facet", "geo_level", "geo_1", "geo_2", "geo_3", "breakdown_1", "breakdown_2",
+              "breakdown_3", "period_type", "period_year", "period_quarter", "period_month")
+row_key <- do.call(paste, c(lapply(series_facts[key_cols], function(x) ifelse(is.na(x), "\u0001", x)), sep = "\u241f"))
+in_dup <- row_key %in% row_key[duplicated(row_key)]
+if (any(in_dup)) {
+  resolved <- series_facts[in_dup, , drop = FALSE] |>
+    group_by(across(all_of(key_cols))) |>
+    slice_max(order_by = .data$value, n = 1, with_ties = FALSE) |>
+    ungroup()
+  cli::cli_alert_info("Merged {sum(in_dup) - nrow(resolved)} row(s) that were the same cell spelled two ways (kept the larger value)")
+  series_facts <- bind_rows(series_facts[!in_dup, , drop = FALSE], resolved)
+}
+
+# Where a cell has monthly rows through December, an annual row for the
+# same cell and year is redundant: for a stock series the Monthly view showed it as an
+# extra point among the months, and for a flow it would be counted twice in
+# the Annual view. Seen only for "All permits (at December 31)" by country,
+# where a province-to-national rollup added monthly rows beside a table's
+# own year-end figures (docs/data-audit-2026-10-18.md, finding E).
+cell_key <- do.call(paste, c(lapply(series_facts[c("theme", "series", "facet", "geo_level", "geo_1", "geo_2", "geo_3",
+                                                   "breakdown_1", "breakdown_2", "breakdown_3", "period_year")],
+                                   function(x) ifelse(is.na(x), "\u0001", x)), sep = "\u241f"))
+# Only when the monthly rows reach December: a year whose monthly series
+# stops early (e.g. "valid permit" months that end in August 2018) keeps its
+# year-end figure.
+redundant_year <- series_facts$period_type == "year" &
+  cell_key %in% cell_key[series_facts$period_type == "month" & series_facts$period_month %in% 12]
+if (any(redundant_year)) {
+  cli::cli_alert_info("Dropped {sum(redundant_year)} annual row(s) that duplicate monthly rows for the same cell and year")
+  series_facts <- series_facts[!redundant_year, , drop = FALSE]
+}
+
+# The spelling unification above must never make two rows share a key.
+dupes <- series_facts |>
+  count(theme, series, facet, geo_level, geo_1, geo_2, geo_3, breakdown_1, breakdown_2, breakdown_3,
+        period_type, period_year, period_quarter, period_month) |>
+  filter(n > 1)
+if (nrow(dupes) > 0) {
+  print(as.data.frame(dupes |> count(theme, series, facet, geo_level, period_type, name = "n_keys")))
+  print(as.data.frame(head(dupes, 8)))
+  stop(nrow(dupes), " duplicate series_facts keys after clean-up")
+}
 
 series_facts <- series_facts |>
   select(theme, series, facet, breakdown_1, breakdown_2, breakdown_3,

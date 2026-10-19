@@ -254,17 +254,41 @@ MAX_BREAKDOWN_LEVELS <- 3
 #' for this table (checked directly, not inferred from the geo rank
 #' itself), so a level that's merely missing its subtotal rows for some
 #' other, genuine data reason isn't silently reinterpreted this way.
-table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month) {
-  period_type_filter <- if (isTRUE(has_month)) "month" else "year"
+#' Narrow a `facts` query to the rows that represent each period once:
+#' monthly rows where the table has them, plus its annual rows for any year
+#' with no monthly rows. Some IRCC tables publish only annual figures for
+#' past years and monthly figures for the current year; reading only the
+#' monthly rows of any table that has some dropped all of those years (e.g.
+#' "Anglophone admissions within Québec" lost 2015-2025 -
+#' docs/data-audit-2026-10-18.md, finding C). Tables with no monthly data
+#' keep using their annual rows.
+#'
+#' Flow tables only: for a stock table an annual figure needn't be a
+#' year-end snapshot - the "study permit holders with a valid permit"
+#' tables' annual columns count everyone holding a permit at any point in
+#' the year, roughly twice the December 31 figure - so stock tables keep
+#' their monthly rows alone.
+period_rows <- function(query, con, table_id, has_month, is_stock = FALSE) {
+  if (!isTRUE(has_month)) return(query |> dplyr::filter(.data$period_type == "year"))
+  if (isTRUE(is_stock)) return(query |> dplyr::filter(.data$period_type == "month"))
+  month_years <- dplyr::tbl(con, "facts") |>
+    dplyr::filter(.data$table_id == !!table_id, .data$period_type == "month") |>
+    dplyr::distinct(.data$period_year) |>
+    dplyr::pull(.data$period_year)
+  query |> dplyr::filter(.data$period_type == "month" |
+                           (.data$period_type == "year" & !(.data$period_year %in% !!month_years)))
+}
+
+table_geo_subtotals <- function(con, table_id, geo_level_idx, has_month, is_stock = FALSE) {
   row_level_needed <- max(geo_level_idx, 1)
   geo_cols <- if (geo_level_idx >= 1) paste0("level_", seq_len(geo_level_idx)) else character(0)
 
   base <- dplyr::tbl(con, "facts") |>
     dplyr::filter(
       .data$table_id == !!table_id,
-      .data$row_level == !!row_level_needed,
-      .data$period_type == !!period_type_filter
-    )
+      .data$row_level == !!row_level_needed
+    ) |>
+    period_rows(con, table_id, has_month, is_stock)
   # row_level == geo_level_idx also matches the grand-total row itself
   # (level_1 IS NA, always sits at row_level 1) whenever geo_level_idx is
   # 1 - excluded here, not just for the geo_level_idx == 0 grand-total
@@ -334,10 +358,25 @@ level_has_real_data <- function(con, table_id, level_col) {
 #' exact-string facet grouping then never recognizes as siblings to merge.
 really_filler_levels <- function(cl, con, table_id) {
   is_generic_fallback <- grepl(GENERIC_FALLBACK_LABEL_REGEX, cl$label, ignore.case = TRUE)
-  cl$is_filler & !(is_generic_fallback & vapply(seq_len(nrow(cl)), function(i) {
+  filler <- cl$is_filler & !(is_generic_fallback & vapply(seq_len(nrow(cl)), function(i) {
     if (!is_generic_fallback[i]) return(FALSE)
     level_has_real_data(con, table_id, paste0("level_", cl$level_index[i]))
   }, logical(1)))
+  # A non-geographic level that takes a single value across the whole table
+  # never splits anything, so it can't be a breakdown. Without this,
+  # permanent_residents/f72b7082's first level, the place "Canada
+  # (excluding Quebec)", became an extra "category" beside the real
+  # immigration categories, doubling that breakdown in the current year
+  # (docs/data-audit-2026-10-18.md, finding A). Geographic levels are left
+  # alone: a Quebec-only table is still a province-level table.
+  single_valued <- vapply(seq_len(nrow(cl)), function(i) {
+    if (!is.na(cl$geo_rank[i]) || filler[i]) return(FALSE)
+    col <- paste0("level_", cl$level_index[i])
+    n <- DBI::dbGetQuery(con, sprintf("SELECT COUNT(DISTINCT %s) AS n FROM facts WHERE table_id = ?", col),
+                         params = list(table_id))$n
+    n == 1
+  }, logical(1))
+  filler | single_valued
 }
 
 #' One table's own true leaf rows (see true_leaf_rows()), reshaped into
@@ -357,8 +396,8 @@ really_filler_levels <- function(cl, con, table_id) {
 #' dropped entirely rather than folded into either. Levels past
 #' MAX_BREAKDOWN_LEVELS are summed away into `breakdown_3` rather than
 #' silently dropped.
-table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_positions, has_month) {
-  period_type_filter <- if (isTRUE(has_month)) "month" else "year"
+table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_positions, has_month,
+                                  is_stock = FALSE) {
   # paste0() recycles a zero-length argument as "" instead of returning
   # character(0) when the other argument is non-empty (here, the constant
   # "level_" prefix) - explicit length checks avoid a bogus single "level_"
@@ -369,7 +408,7 @@ table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_
   breakdown_src_cols <- if (n_breakdown > 0) paste0("level_", facet_positions) else character(0)
 
   d <- true_leaf_rows(con, table_id, n_levels) |>
-    dplyr::filter(.data$period_type == !!period_type_filter) |>
+    period_rows(con, table_id, has_month, is_stock) |>
     dplyr::select(dplyr::all_of(c(geo_cols, breakdown_src_cols)), "period_year", "period_quarter",
                    "period_month", "value") |>
     dplyr::collect()

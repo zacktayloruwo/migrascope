@@ -61,6 +61,7 @@ SERIES_FACET_LABELS_FR <- c(
   "DLI Name" = "Nom de l'ÉED",
   "Institution Type" = "Type d'établissement",
   "Institution Type and Citizenship" = "Type d'établissement et citoyenneté",
+  "Immigration Category and Express Entry" = "Catégorie d'immigration et Entrée express",
   "Public/Private" = "Public/privé",
   "Gender" = "Genre",
   "Immigration Category" = "Catégorie d'immigration",
