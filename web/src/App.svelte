@@ -3,6 +3,7 @@
   import { loadMeta, type DefaultView, type Meta } from './lib/meta'
   import { Explorer } from './lib/state.svelte'
   import { I18n, formatDate, formatMonth, themeLabel } from './lib/i18n'
+  import { buildCsv, downloadText, slug } from './lib/csv'
   import Header from './components/Header.svelte'
   import Controls from './components/Controls.svelte'
   import Chart from './components/Chart.svelte'
@@ -52,6 +53,54 @@
 
   let chartCard = $state<HTMLElement>()
   let fullscreen = $state(false)
+  /** Categories hidden via the chart legend - shared with the CSV export. */
+  let hiddenCategories = $state(new Set<string>())
+
+  /**
+   * In a drilled view, rows with no category value are the drilled-into
+   * category itself, with no finer breakdown in the source - label them that
+   * way rather than "NA". Dead-end drills aren't offered (query/drill.ts), so
+   * this is a safety net.
+   */
+  const nullLabel = $derived.by(() => {
+    const parent = app?.params?.drill2 ?? app?.params?.drill1
+    if (!app || !i18n || !parent) return undefined
+    return `${i18n.category(parent, app.lang)} ${app.lang === 'fr' ? '(aucune ventilation)' : '(no further breakdown)'}`
+  })
+  const categoryName = (c: string | null) => (c === null && nullLabel ? nullLabel : i18n!.category(c, app!.lang))
+
+  /** Download what the chart currently shows as CSV. */
+  function exportCsv() {
+    if (!app || !i18n || !app.plotData || !app.params) return
+    const l = app.lang
+    const data = app.plotData
+    const hasNull = data.rows.some((r) => r.category === null)
+    const columns = [...data.categoryOrder, ...(hasNull ? [null] : [])]
+      .filter((c) => !hiddenCategories.has(categoryName(c)))
+    const percent = app.params.displayAs === 'percent'
+    const sourceTables = [...new Set(app.sourceIds.view.length ? app.sourceIds.view : app.sourceIds.series)]
+      .map((id) => app!.meta.sources.find((s) => id.includes(`/${s.hash}__`)))
+      .filter((s) => s !== undefined)
+    const notes = [
+      title + (percent ? (l === 'fr' ? ' (pourcentage du total)' : ' (percentage of total)') : ''),
+      ...(partialNote ? [`* ${partialNote}`] : []),
+      i18n.t('suppression_note', l),
+      ...sourceTables.map((s) => `${l === 'fr' ? 'Source :' : 'Source:'} ${s!.agency}, "${s!.table_name}", ${s!.url}`),
+      `${l === 'fr' ? 'Téléchargé de MigraScope le' : 'Downloaded from MigraScope on'} ${new Date().toISOString().slice(0, 10)}${l === 'fr' ? ' :' : ':'} ${location.href}`
+    ]
+    const csv = buildCsv(data, {
+      columns,
+      header: categoryName,
+      periodLabel: l === 'fr' ? 'Période' : 'Period',
+      percent,
+      notes
+    })
+    const file = slug(['migrascope', themeLabel(app.theme, 'en'), app.series,
+      app.params.facet === 'Total' ? '' : app.params.facet, app.params.drill1 ?? '', app.params.drill2 ?? '',
+      app.params.geoUnitPrefix.at(-1) ?? (app.params.geoLevel === 'National' ? '' : app.params.geoLevel),
+      app.params.granularity, percent ? 'percent' : '', `${app.params.years[0]}-${app.params.years[1]}`])
+    downloadText(`${file}.csv`, csv)
+  }
   $effect(() => {
     const onChange = () => (fullscreen = document.fullscreenElement === chartCard)
     document.addEventListener('fullscreenchange', onChange)
@@ -176,6 +225,17 @@
       <section class="card chart-card" class:fullscreen aria-labelledby="chart-title" bind:this={chartCard}>
         <div class="chart-head">
           <h1 id="chart-title">{title}</h1>
+          <div class="chart-actions">
+          {#if app.plotData?.rows.length}
+            <button type="button" class="icon-button" onclick={exportCsv}
+                    aria-label={app.lang === 'fr' ? 'Télécharger les données affichées (CSV)' : 'Download the data shown (CSV)'}
+                    title={app.lang === 'fr' ? 'Télécharger les données affichées (CSV)' : 'Download the data shown (CSV)'}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 4v12" /><path d="m7 11 5 5 5-5" /><path d="M5 20h14" />
+              </svg>
+            </button>
+          {/if}
           {#if document.fullscreenEnabled}
             <button type="button" class="icon-button" onclick={toggleFullscreen}
                     aria-label={fullscreen ? (app.lang === 'fr' ? 'Quitter le plein écran' : 'Exit full screen')
@@ -187,6 +247,7 @@
               </svg>
             </button>
           {/if}
+          </div>
         </div>
         {#if partitionError}
           <p class="message" role="alert">{partitionError}</p>
@@ -196,7 +257,8 @@
           <p class="message">{i18n.t('no_data', app.lang)}</p>
         {:else}
           <Chart data={app.plotData} lang={app.lang} {i18n} granularity={app.params?.granularity ?? 'Annual'}
-                 percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)} />
+                 percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)}
+                 bind:hidden={hiddenCategories} {nullLabel} />
         {/if}
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}
@@ -219,6 +281,7 @@
     flex: none; width: 32px; height: 32px; border: 1px solid var(--border-strong); border-radius: 7px;
     background: var(--surface); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
   }
+  .chart-actions { display: flex; gap: 6px; flex: none; }
   .icon-button:hover { background: var(--primary-tint); color: var(--primary); }
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }

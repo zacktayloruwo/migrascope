@@ -13,10 +13,14 @@
 
   echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer])
 
-  let { data, lang, i18n, granularity, percent, partial = [] }: {
+  let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel }: {
     data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean
     /** Period labels with incomplete data (e.g. "2026"): marked with an asterisk above the bar. */
     partial?: string[]
+    /** Display names of categories switched off in the legend (bindable, so the CSV export can skip them). */
+    hidden?: Set<string>
+    /** Label for rows with no category value; defaults to the translated "NA". */
+    nullLabel?: string
   } = $props()
 
   /**
@@ -70,14 +74,13 @@
       .sort((a, b) => (totals.get(b) ?? 0) - (totals.get(a) ?? 0))
     const colour = (c: string) => (c === NULL_KEY ? FIXED[NA_LABEL] : FIXED[c] ?? PALETTE[ranked.indexOf(c) % PALETTE.length])
     const single = data.categoryOrder.length <= 1 && !hasNull
-    const name = (c: string) => (c === NULL_KEY ? i18n.category(null, lang) : i18n.category(c, lang))
+    const name = (c: string) => (c === NULL_KEY ? nullLabel ?? i18n.category(null, lang) : i18n.category(c, lang))
     const items = [...data.categoryOrder, ...(hasNull ? [NULL_KEY] : [])]
       .map((c) => ({ key: c, name: name(c), colour: single ? '#2348C4' : colour(c), hatched: c === SUPPRESSED_RESIDUAL }))
     return { stackOrder, items, single, colour, name, hasNull }
   })
 
-  /** Series the reader has switched off by clicking the legend. */
-  let hidden = $state(new Set<string>())
+  // `hidden` (a prop): series the reader has switched off by clicking the legend.
   $effect(() => { void data; hidden = new Set() }) // a new view starts with everything shown
 
   function toggle(name: string) {
