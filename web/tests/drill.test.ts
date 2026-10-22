@@ -53,6 +53,6 @@ describe('every offered drill-down shows named categories', () => {
         }
       }
       expect(checked).toBeGreaterThan(0)
-    })
+    }, 60_000) // the largest partitions take several seconds on CI runners
   }
 })
