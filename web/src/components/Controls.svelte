@@ -52,14 +52,14 @@
         <span class="word" aria-hidden="true">›</span>
         <select class="pill" aria-label={i18n.t('drill1_label', l)} value={app.drill1}
                 onchange={(e) => app.setDrill1(e.currentTarget.value)}>
-          <option value="none">{i18n.t('none_choice', l)}</option>
+          <option value="none">{i18n.t('drill_all_choice', l)}</option>
           {#each app.drill1Values as v (v)}<option value={v}>{i18n.category(v, l)}</option>{/each}
         </select>
         {#if app.drill2Needed}
           <span class="word" aria-hidden="true">›</span>
           <select class="pill" aria-label={i18n.t('drill2_label', l)} value={app.drill2}
                   onchange={(e) => app.setDrill2(e.currentTarget.value)}>
-            <option value="none">{i18n.t('none_choice', l)}</option>
+            <option value="none">{i18n.t('drill_all_of', l, i18n.category(app.drill1, l))}</option>
             {#each app.drill2Values as v (v)}<option value={v}>{i18n.category(v, l)}</option>{/each}
           </select>
         {/if}

@@ -104,6 +104,8 @@ STRINGS <- list(
                           fr = "Nombre maximal de catégories affichées (le reste groupé sous « Autre »)"),
 
   none_choice        = c(en = "None",                   fr = "Aucun"),
+  drill_all_choice   = c(en = "All categories",         fr = "Toutes les catégories"),
+  drill_all_of       = c(en = "All %s",                 fr = "Tout : %s"),
   geo_not_available  = c(en = "Not available for this series", fr = "Non disponible pour cette série"),
   all_choice         = c(en = "All",                    fr = "Tous"),
   monthly            = c(en = "Monthly",                fr = "Mensuel"),
