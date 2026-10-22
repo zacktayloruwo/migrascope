@@ -1,5 +1,6 @@
 // Every drill-down the app offers must lead somewhere: a drilled view always
-// shows at least one named category (dead ends used to show a lone "NA" bar).
+// shows at least one named category with a non-zero value (dead ends used to
+// show a lone "NA" bar, or an empty chart of zeros).
 // A blank bucket may still appear beside named ones where the source splits a
 // category only partly - e.g. IMP "work purposes only" > Significant benefit,
 // broken down only for a few small provinces - and the app labels that bucket
@@ -42,11 +43,11 @@ describe('every offered drill-down shows named categories', () => {
         }
         for (const d1 of drillableValues(cols, r.series, r.facet)) {
           const level1 = buildPlotData(cols, { ...base, drill1: d1 })
-          expect(level1.rows.some((x) => x.category !== null), `${r.series} > ${r.facet} > ${d1}`).toBe(true)
+          expect(level1.rows.some((x) => x.category !== null && x.value !== 0), `${r.series} > ${r.facet} > ${d1}`).toBe(true)
           checked++
           for (const d2 of drillableValues(cols, r.series, r.facet, d1)) {
             const level2 = buildPlotData(cols, { ...base, drill1: d1, drill2: d2 })
-            expect(level2.rows.some((x) => x.category !== null), `${r.series} > ${r.facet} > ${d1} > ${d2}`).toBe(true)
+            expect(level2.rows.some((x) => x.category !== null && x.value !== 0), `${r.series} > ${r.facet} > ${d1} > ${d2}`).toBe(true)
             checked++
           }
         }
