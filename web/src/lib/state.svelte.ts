@@ -13,9 +13,10 @@
 
 import type { SeriesFactsColumns } from '../query/columns'
 import { GEO_UNIT_SEP } from '../query/constants'
-import { buildPlotData, listBreakdownValues, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
+import { buildPlotData, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
          type ViewParams } from '../query/plotData'
 import { partialPeriods, type PartialPeriod } from '../query/partial'
+import { drillableValues } from '../query/drill'
 import { THEMES, type Lang } from './i18n'
 import type { DefaultView, Meta, SummaryRow } from './meta'
 
@@ -103,13 +104,14 @@ export class Explorer {
 
   drill1Values = $derived.by(() => {
     if (!this.colsReady || this.catLevel === 'none' || !this.catRow?.has_breakdown_2) return []
-    return listBreakdownValues(this.cols!, this.series, this.catLevel)
+    // only categories that split further - no dead-end drills (see query/drill.ts)
+    return drillableValues(this.cols!, this.series, this.catLevel)
   })
   drill1Needed = $derived(this.showBreakdown && this.drill1Values.length > 0)
 
   drill2Values = $derived.by(() => {
     if (!this.drill1Needed || this.drill1 === 'none' || !this.catRow?.has_breakdown_3) return []
-    return listBreakdownValues(this.cols!, this.series, this.catLevel, this.drill1)
+    return drillableValues(this.cols!, this.series, this.catLevel, this.drill1)
   })
   drill2Needed = $derived(this.drill2Values.length > 0)
 
