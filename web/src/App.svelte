@@ -3,7 +3,8 @@
   import { loadMeta, type DefaultView, type Meta } from './lib/meta'
   import { Explorer } from './lib/state.svelte'
   import { I18n, formatDate, formatMonth, themeLabel } from './lib/i18n'
-  import { buildCsv, downloadText, slug } from './lib/csv'
+  import { buildCsv, downloadBlob, downloadText, slug } from './lib/csv'
+  import { renderSlide } from './lib/slide'
   import Header from './components/Header.svelte'
   import Controls from './components/Controls.svelte'
   import Chart from './components/Chart.svelte'
@@ -69,6 +70,23 @@
   })
   const categoryName = (c: string | null) => (c === null && nullLabel ? nullLabel : i18n!.category(c, app!.lang))
 
+  /** Source records behind the current view (as Citation.svelte picks them). */
+  const sourceTables = $derived.by(() => {
+    if (!app) return []
+    const ids = [...new Set(app.sourceIds.view.length ? app.sourceIds.view : app.sourceIds.series)]
+    return ids.map((id) => app!.meta.sources.find((s) => id.includes(`/${s.hash}__`)))
+      .filter((s) => s !== undefined)
+  })
+
+  /** Download file name (without extension) describing the current view. */
+  function fileBase(): string {
+    const p = app!.params!
+    return slug(['migrascope', themeLabel(app!.theme, 'en'), app!.series,
+      p.facet === 'Total' ? '' : p.facet, p.drill1 ?? '', p.drill2 ?? '',
+      p.geoUnitPrefix.at(-1) ?? (p.geoLevel === 'National' ? '' : p.geoLevel),
+      p.granularity, p.displayAs === 'percent' ? 'percent' : '', `${p.years[0]}-${p.years[1]}`])
+  }
+
   /** Download what the chart currently shows as CSV. */
   function exportCsv() {
     if (!app || !i18n || !app.plotData || !app.params) return
@@ -78,9 +96,6 @@
     const columns = [...data.categoryOrder, ...(hasNull ? [null] : [])]
       .filter((c) => !hiddenCategories.has(categoryName(c)))
     const percent = app.params.displayAs === 'percent'
-    const sourceTables = [...new Set(app.sourceIds.view.length ? app.sourceIds.view : app.sourceIds.series)]
-      .map((id) => app!.meta.sources.find((s) => id.includes(`/${s.hash}__`)))
-      .filter((s) => s !== undefined)
     const notes = [
       title + (percent ? (l === 'fr' ? ' (pourcentage du total)' : ' (percentage of total)') : ''),
       ...(partialNote ? [`* ${partialNote}`] : []),
@@ -95,11 +110,40 @@
       percent,
       notes
     })
-    const file = slug(['migrascope', themeLabel(app.theme, 'en'), app.series,
-      app.params.facet === 'Total' ? '' : app.params.facet, app.params.drill1 ?? '', app.params.drill2 ?? '',
-      app.params.geoUnitPrefix.at(-1) ?? (app.params.geoLevel === 'National' ? '' : app.params.geoLevel),
-      app.params.granularity, percent ? 'percent' : '', `${app.params.years[0]}-${app.params.years[1]}`])
-    downloadText(`${file}.csv`, csv)
+    downloadText(`${fileBase()}.csv`, csv)
+  }
+
+  let chartRef = $state<{ renderImage: (w: number, h: number) => Promise<string> }>()
+  let exportingPng = $state(false)
+
+  /** Download the chart as a 16:9 slide (PNG) with title, notes, sources and the app's address. */
+  async function exportPng() {
+    if (!app || !i18n || !app.params || !chartRef || exportingPng) return
+    const l = app.lang
+    const p = app.params
+    const gran = i18n.t(({ Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual' } as Record<string, string>)[p.granularity], l)
+    const years = p.years[0] === p.years[1] ? `${p.years[0]}` : `${p.years[0]}–${p.years[1]}`
+    const subtitle = [`${gran}, ${years}`, ...(p.displayAs === 'percent' ? [i18n.t('percentage_total', l)] : [])].join(' · ')
+    const agency = [...new Set(sourceTables.map((s) => s!.agency))].join(' / ')
+    const sources = sourceTables.length
+      ? i18n.t('citation_source', l) + agency + i18n.t('citation_portal', l) +
+        sourceTables.map((s) => `“${s!.table_name}”${i18n!.t('citation_last_updated', l, s!.updated_at)}`)
+          .join(l === 'fr' ? ' ; ' : '; ') + '.'
+      : ''
+    // The suppression note only matters when the chart shows a Suppressed Residual.
+    const residual = app.plotData?.rows.some((r) => r.category === 'Suppressed Residual') &&
+      !hiddenCategories.has(i18n.category('Suppressed Residual', l))
+    const notes = [...(partialNote ? [`* ${partialNote}`] : []),
+      ...(residual ? [i18n.t('suppression_note', l)] : []), ...(sources ? [sources] : [])]
+    const url = new URL('.', location.href).href.replace(/^https?:\/\//, '').replace(/\/$/, '')
+    exportingPng = true
+    try {
+      const png = await renderSlide({ title, subtitle, notes, leadNote: !!partialNote, url },
+                                    (w, h) => chartRef!.renderImage(w, h))
+      downloadBlob(`${fileBase()}.png`, png)
+    } finally {
+      exportingPng = false
+    }
   }
   $effect(() => {
     const onChange = () => (fullscreen = document.fullscreenElement === chartCard)
@@ -236,6 +280,16 @@
               </svg>
             </button>
           {/if}
+          {#if app.plotData?.rows.length}
+            <button type="button" class="icon-button" onclick={exportPng} disabled={exportingPng}
+                    aria-label={app.lang === 'fr' ? 'Télécharger le graphique en diapositive 16:9 (PNG)' : 'Download the chart as a 16:9 slide (PNG)'}
+                    title={app.lang === 'fr' ? 'Télécharger le graphique en diapositive 16:9 (PNG)' : 'Download the chart as a 16:9 slide (PNG)'}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+              </svg>
+            </button>
+          {/if}
           {#if document.fullscreenEnabled}
             <button type="button" class="icon-button" onclick={toggleFullscreen}
                     aria-label={fullscreen ? (app.lang === 'fr' ? 'Quitter le plein écran' : 'Exit full screen')
@@ -258,7 +312,7 @@
         {:else}
           <Chart data={app.plotData} lang={app.lang} {i18n} granularity={app.params?.granularity ?? 'Annual'}
                  percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)}
-                 bind:hidden={hiddenCategories} {nullLabel} />
+                 bind:hidden={hiddenCategories} {nullLabel} bind:this={chartRef} />
         {/if}
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}

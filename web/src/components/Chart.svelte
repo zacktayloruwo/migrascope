@@ -6,12 +6,12 @@
   import * as echarts from 'echarts/core'
   import { BarChart, ScatterChart } from 'echarts/charts'
   import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
-  import { SVGRenderer } from 'echarts/renderers'
+  import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
   import type { PlotData } from '../query/plotData'
   import { formatNumber, formatPercent, type I18n, type Lang } from '../lib/i18n'
   import { NA_LABEL, OTHER, SUPPRESSED_RESIDUAL } from '../query/constants'
 
-  echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer])
+  echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer, CanvasRenderer])
 
   let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel }: {
     data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean
@@ -90,8 +90,14 @@
     hidden = next
   }
 
-  const option = $derived.by(() => {
+  /**
+   * The chart's ECharts option. `forImage` is the slide export (renderImage):
+   * no animation or tooltip, larger text, and ECharts' own legend in place of
+   * the HTML one, listing only the categories shown.
+   */
+  function buildOption(forImage = false) {
     const { periodOrder, rows } = data
+    const fontSize = forImage ? 20 : 12
     // Bottom of the stack first; rows with a missing category go at the very bottom.
     const { stackOrder, single, colour, name } = legend
     const periodIndex = new Map(periodOrder.map((p, i) => [p, i]))
@@ -105,10 +111,14 @@
     }
 
     return {
+      animation: !forImage,
       animationDuration: 300,
       aria: { enabled: true, decal: { show: false } },
-      grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
-      tooltip: {
+      textStyle: forImage ? { fontFamily: "'Noto Sans', system-ui, sans-serif" } : undefined,
+      grid: forImage
+        ? { left: 0, right: 8, top: 36, bottom: legend.single ? 0 : 64, containLabel: true }
+        : { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
+      tooltip: forImage ? undefined : {
         trigger: 'axis', axisPointer: { type: 'shadow' }, confine: true,
         formatter: (items: { seriesName: string; value: number | null; color: string; axisValueLabel: string }[]) => {
           const shown = items.filter((p) => p.seriesName !== PARTIAL_MARKER && p.value != null && p.value !== 0).reverse()
@@ -126,9 +136,13 @@
       },
       // Drawn as HTML below the chart (wraps on phones, readable by screen
       // readers); this hidden legend only carries which series are switched off.
+      // The image has no HTML legend, so it shows ECharts' own, without the hidden categories.
       legend: {
-        show: false, data: legend.items.map((i) => i.name),
-        selected: Object.fromEntries(legend.items.map((i) => [i.name, !hidden.has(i.name)]))
+        show: forImage && !legend.single,
+        data: legend.items.map((i) => i.name).filter((n) => !forImage || !hidden.has(n)),
+        selected: Object.fromEntries(legend.items.map((i) => [i.name, !hidden.has(i.name)])),
+        bottom: 0, left: 'center', icon: 'roundRect', itemWidth: 18, itemHeight: 18, itemGap: 24,
+        textStyle: { fontSize: 18, color: '#14213D' }
       },
       // Axis 0 carries the labels. Axes 1 and 2 are invisible copies whose
       // split lines fall on category boundaries (ticks not centred on bars):
@@ -138,7 +152,7 @@
         {
           type: 'category', data: periodOrder,
           axisLabel: {
-            rotate: periodOrder.length > 12 ? 45 : 0, color: '#3A4558',
+            rotate: periodOrder.length > (forImage ? 20 : 12) ? 45 : 0, color: '#3A4558', fontSize,
             interval: granularity === 'Monthly' ? (i: number) => i % 3 === 0 : 'auto'
           },
           axisTick: { alignWithLabel: true }
@@ -150,12 +164,12 @@
       ],
       yAxis: {
         type: 'value', max: percent ? 100 : undefined,
-        axisLabel: { color: '#3A4558', formatter: (v: number) => (percent ? `${v}%` : formatNumber(v, lang)) },
+        axisLabel: { color: '#3A4558', fontSize, formatter: (v: number) => (percent ? `${v}%` : formatNumber(v, lang)) },
         splitLine: { lineStyle: { color: '#E6EAEE' } }
       },
       series: [...stackOrder.map((c) => ({
         name: name(c),
-        type: 'bar', stack: 'total', barMaxWidth: 48,
+        type: 'bar', stack: 'total', barMaxWidth: forImage ? 96 : 48,
         emphasis: { focus: 'series' },
         data: values.get(c),
         itemStyle: {
@@ -177,11 +191,28 @@
             .reduce((sum, c) => sum + Math.max(0, values.get(c)![i] ?? 0), 0)
           return [[i, top]]
         }),
-        label: { show: true, position: 'top', distance: 2, formatter: '*', fontSize: 20, fontWeight: 700, color: '#14213D' }
+        label: { show: true, position: 'top', distance: 2, formatter: '*', fontSize: forImage ? 32 : 20, fontWeight: 700, color: '#14213D' }
       }] : [])
     ]
     }
-  })
+  }
+  const option = $derived.by(() => buildOption())
+
+  /**
+   * The chart drawn off screen at `width` x `height` CSS pixels, as a PNG data
+   * URL - for the slide export. Waits for the web fonts so labels use Noto Sans.
+   */
+  export async function renderImage(width: number, height: number, pixelRatio = 1): Promise<string> {
+    await document.fonts.load("20px 'Noto Sans'")
+    const div = document.createElement('div')
+    const img = echarts.init(div, undefined, { renderer: 'canvas', width, height, devicePixelRatio: pixelRatio })
+    try {
+      img.setOption(buildOption(true) as echarts.EChartsCoreOption)
+      return img.getDataURL({ type: 'png', pixelRatio, backgroundColor: '#FFFFFF' })
+    } finally {
+      img.dispose()
+    }
+  }
 
   let el: HTMLDivElement
   let chart: echarts.ECharts | undefined
