@@ -3,7 +3,7 @@
   // broken down by <facet> in <place>") with the remaining options below.
   // Every control is a native <select>/<button>, so keyboard and screen-reader
   // support come for free; the state rules live in Explorer, not here.
-  import { GEO_LEVELS, type Explorer, type GeoLevel } from '../lib/state.svelte'
+  import { GEO_LEVELS, GRANULARITIES, type Explorer, type GeoLevel } from '../lib/state.svelte'
   import { THEMES, type I18n } from '../lib/i18n'
   import type { Granularity } from '../query/plotData'
 
@@ -95,8 +95,11 @@
     <div class="group" role="group" aria-labelledby="lbl-gran">
       <span class="label" id="lbl-gran">{i18n.t('granularity_label', l)}</span>
       <div class="segmented">
-        {#each app.granularityChoices as g (g)}
-          <button type="button" aria-pressed={app.granularity === g} onclick={() => (app.granularity = g)}>
+        <!-- All three shown; those finer than the series is published at are greyed out, like geography. -->
+        {#each GRANULARITIES as g (g)}
+          <button type="button" aria-pressed={app.granularity === g} disabled={!app.granularityChoices.includes(g)}
+                  title={!app.granularityChoices.includes(g) ? i18n.t('geo_not_available', l) : undefined}
+                  onclick={() => (app.granularity = g)}>
             {i18n.t(granKey[g], l)}
           </button>
         {/each}

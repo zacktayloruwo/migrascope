@@ -91,7 +91,8 @@ export class Explorer {
     return this.rankRows.find((r) => r.facet === facet) ?? null
   })
 
-  granularityChoices = $derived<Granularity[]>(this.scope?.has_month ? GRANULARITIES : ['Annual'])
+  granularityChoices = $derived<Granularity[]>(
+    !this.scope?.has_month ? ['Annual'] : this.scope.quarterly_only ? ['Quarterly', 'Annual'] : GRANULARITIES)
 
   /** Percentage of a single unbroken bar is always 100% (app.R: setPercentAllowed). */
   percentAllowed = $derived(!(this.scope?.facet === 'Total' &&

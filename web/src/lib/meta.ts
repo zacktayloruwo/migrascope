@@ -15,6 +15,8 @@ export interface SummaryRow {
   has_breakdown_2: boolean
   has_breakdown_3: boolean
   has_month: boolean
+  /** Monthly rows only at quarter ends (quarterly source): no Monthly view. */
+  quarterly_only?: boolean
   is_stock: boolean
   min_year: number
   max_year: number

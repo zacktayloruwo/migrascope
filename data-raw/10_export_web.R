@@ -98,6 +98,14 @@ parquet_files <- lapply(seq_len(nrow(part_rows)), function(i) {
 
 # ---- selector metadata ------------------------------------------------------
 series_summary <- build_series_summary(con)
+# Monthly rows only at quarter ends (Statistics Canada's quarterly estimates,
+# data-raw/09b): the explorer offers Quarterly and Annual, not Monthly.
+quarterly_only <- dbGetQuery(con, "
+  SELECT theme, series, facet, geo_level, bool_and(period_month IN (3, 6, 9, 12)) AS quarterly_only
+  FROM series_facts WHERE period_type = 'month' GROUP BY ALL")
+series_summary <- series_summary |>
+  left_join(quarterly_only, by = c("theme", "series", "facet", "geo_level")) |>
+  mutate(quarterly_only = coalesce(quarterly_only, FALSE))
 write_json(series_summary, "series_summary.json")
 
 geo_rows <- series_summary[series_summary$geo_level != "National", , drop = FALSE]
