@@ -62,6 +62,9 @@ SERIES_FACET_LABELS_FR <- c(
   "Institution Type" = "Type d'établissement",
   "Institution Type and Citizenship" = "Type d'établissement et citoyenneté",
   "Immigration Category and Express Entry" = "Catégorie d'immigration et Entrée express",
+  # Statistics Canada non-permanent residents (data-raw/09b_add_statcan_npr.R)
+  "All non-permanent residents" = "Tous les résidents non permanents",
+  "Non-Permanent Resident Type" = "Type de résident non permanent",
   "Public/Private" = "Public/privé",
   "Gender" = "Genre",
   "Immigration Category" = "Catégorie d'immigration",
@@ -142,6 +145,8 @@ STRINGS <- list(
   citation_source       = c(en = "Source: ",           fr = "Source : "),
   citation_portal       = c(en = ", Open Government Portal, Government of Canada — ",
                             fr = ", Portail du gouvernement ouvert, Gouvernement du Canada — "),
+  citation_portal_statcan = c(en = " — ",               fr = " — "),
+  citation_table_page   = c(en = "table page",         fr = "page du tableau"),
   citation_last_accessed = c(en = "Last accessed %s.", fr = "Dernier accès le %s."),
 
   other_category     = c(en = "Other",                 fr = "Autre"),

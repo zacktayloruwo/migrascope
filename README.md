@@ -63,6 +63,8 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
 
 9.  **`data-raw/08_build_series_facts.R`** — builds `series_facts`, the table the app actually queries: one row per genuinely distinct (theme, series, breakdown facet/depth, geography, period) fact, already deduplicated across every raw source table that contributes to it. This is the fix for a problem query-time table selection couldn't solve - many tables within one series independently publish the same underlying total (e.g. a province's grand total, once broken down by Sex, once by Occupation, once by CD/CSD), each with its own suppression pattern, so the number shown used to depend on which sibling table happened to get picked. Here, every geography level a series supports is built by pulling each qualifying member table's own published subtotal rows at that depth and, cell by cell, keeping the largest value across every contributing table (suppression only ever removes value from a sum, never inflates it, so the least-suppressed sibling has the most complete number) - the winning `table_id` is kept in `source_table_id` for traceability. Raw `facts`/`catalog` are untouched underneath; this reads them and writes a new, additional table. Must run after `06_build_label_lookups.R`.
 
+10. **`data-raw/09b_add_statcan_npr.R`** — adds the Non-Permanent Resident Population theme from Statistics Canada table [17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101), which isn't on the Open Government Portal and so bypasses steps 1–9. It downloads the table's English and French CSVs (skipped when StatCan's release time is unchanged), checks that types add up to their groups and provinces to Canada, appends its rows to `series_facts` and its French labels to `category_translations`, and writes `app/data/statcan_sources.csv` for the citation. Its quarterly estimates (dated the first day of a quarter) are stored as stocks at the end of the previous quarter, so a year's figure is its December 31 count. `08` and `09_build_translations.R` rewrite those tables, so re-run this after either; `10_export_web.R` stops if the theme is missing.
+
 Run from the project root:
 
 ``` r
@@ -75,6 +77,7 @@ source("data-raw/05_build_duckdb.R")
 source("data-raw/06_build_label_lookups.R")
 source("data-raw/07_build_series_reference.R")
 source("data-raw/08_build_series_facts.R")
+source("data-raw/09b_add_statcan_npr.R")   # Statistics Canada non-permanent residents theme (re-run after 08/09)
 source("data-raw/10_export_web.R")         # Parquet + JSON for the static web app (web/), see docs/wasm-port-plan.md
 source("data-raw/11_export_golden.R")      # golden files for the web app's parity tests (cd web && npm test)
 ```

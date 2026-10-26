@@ -38,6 +38,19 @@ export interface SourceRecord {
   url: string
   dataset_url: string
   updated_at: string
+  /** Citation wording: IRCC/IRB files on the Open Government Portal, or a Statistics Canada table. */
+  portal?: 'open_canada' | 'statcan'
+  /** French names, where the source publishes them (Statistics Canada). */
+  agency_fr?: string
+  table_name_fr?: string
+  dataset_url_fr?: string
+}
+
+/** A source record with its French names swapped in, where it has them. */
+export function localizeSource(s: SourceRecord, lang: 'en' | 'fr'): SourceRecord {
+  if (lang === 'en') return s
+  return { ...s, agency: s.agency_fr ?? s.agency, table_name: s.table_name_fr ?? s.table_name,
+           dataset_url: s.dataset_url_fr ?? s.dataset_url }
 }
 
 export interface StringsFile {

@@ -5,7 +5,7 @@ import type { Meta } from './meta'
 
 export type Lang = 'en' | 'fr'
 
-/** app.R: DATASET_LABELS / DATASET_LABELS_FR, in the Theme picker's order. */
+/** app.R: DATASET_LABELS / DATASET_LABELS_FR, in the Theme picker's order (npr_population is Statistics Canada's). */
 export const THEMES: { id: string; en: string; fr: string }[] = [
   { id: 'permanent_residents', en: 'Permanent Residents', fr: 'Résidents permanents' },
   { id: 'temporary_workers_imp', en: 'International Mobility Program', fr: 'Programme de mobilité internationale' },
@@ -13,7 +13,8 @@ export const THEMES: { id: string; en: string; fr: string }[] = [
   { id: 'study_permit_holders', en: 'Study Permit Holders', fr: "Titulaires d'un permis d'études" },
   { id: 'tr_to_pr_transition', en: 'TR → PR Transition', fr: 'Transition de résident temporaire à résident permanent' },
   { id: 'asylum_claimants', en: 'Asylum Claimants', fr: "Demandeurs d'asile" },
-  { id: 'refugees', en: 'Refugees', fr: 'Réfugiés' }
+  { id: 'refugees', en: 'Refugees', fr: 'Réfugiés' },
+  { id: 'npr_population', en: 'Non-Permanent Resident Population', fr: 'Population de résidents non permanents' }
 ]
 
 export function themeLabel(id: string, lang: Lang): string {

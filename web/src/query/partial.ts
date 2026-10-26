@@ -42,18 +42,25 @@ export function partialPeriods(cols: SeriesFactsColumns, p: ViewParams, dataThro
   const span = (months: Set<number>): [number, number] => [Math.min(...months), Math.max(...months)]
   const out: PartialPeriod[] = []
 
+  // A stock series' period is complete once it has its closing month (a
+  // year's December, a quarter's last month) - its bar shows only that
+  // snapshot, so earlier months needn't all be there (Statistics Canada's
+  // estimates are quarterly).
+  const incomplete = (months: Set<number>, last: number, all: number) =>
+    p.isStock ? !months.has(last) : months.size < all
+
   if (p.granularity === 'Annual') {
     for (const year of [...years].sort((a, b) => a - b)) {
       const months = byYear.get(year)
       if (months) {
-        if (months.size < 12) out.push({ period: String(year), year, months: span(months) })
+        if (incomplete(months, 12, 12)) out.push({ period: String(year), year, months: span(months) })
       } else if (year === throughYear && throughMonth < 12) {
         out.push({ period: String(year), year, months: null })
       }
     }
   } else {
     for (const [period, months] of [...byQuarter.entries()].sort()) {
-      if (months.size < 3) out.push({ period, year: Number(period.slice(0, 4)), months: span(months) })
+      if (incomplete(months, Number(period.slice(-1)) * 3, 3)) out.push({ period, year: Number(period.slice(0, 4)), months: span(months) })
     }
   }
   return out

@@ -1,4 +1,4 @@
-MigraScope visualizes Canadian immigration and refugee statistics published as open data by **Immigration, Refugees and Citizenship Canada (IRCC)** and the **Immigration and Refugee Board of Canada (IRB)**. Choose what to show in the sentence at the top of the page, adjust the options below it, and the chart updates immediately.
+MigraScope visualizes Canadian immigration and refugee statistics published as open data by **Immigration, Refugees and Citizenship Canada (IRCC)**, the **Immigration and Refugee Board of Canada (IRB)** and **Statistics Canada**. Choose what to show in the sentence at the top of the page, adjust the options below it, and the chart updates immediately.
 
 The app was created by Dr. Zack Taylor, Dept. of Political Science, at the University of Western Ontario out of frustration with making ad hoc plots from these Excel sheets.
 
@@ -10,6 +10,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 - **TR → PR Transition** — temporary residents who went on to become permanent residents.
 - **Asylum Claimants** — persons who made a refugee claim inside Canada.
 - **Refugees** — Refugee Protection Division (RPD) decisions (accepted / rejected / other outcome), combining two source tables into one continuous 1997–2026 series.
+- **Non-Permanent Resident Population** — Statistics Canada's quarterly estimates of everyone living in Canada on a work or study permit, their family members, and asylum claimants, protected persons and related groups, from July 2021. Unlike the IRCC themes, which count permits and claims, this counts people, each in one type only. Each estimate is a stock, dated by Statistics Canada to the first day of a quarter; it is shown at the end of the quarter before (July 1 as June, January 1 as December of the previous year), so a year's bar is its population on December 31.
 
 #### Choosing what to show
 
@@ -37,7 +38,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 #### Source
 
-The data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/). It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
+The IRCC and IRB data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/), and the non-permanent resident estimates from [Statistics Canada table 17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101). It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
 
 A total of {{N_TABLES}} distinct tables are included.
 

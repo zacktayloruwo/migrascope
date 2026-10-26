@@ -1,6 +1,6 @@
 <script lang="ts">
   import { DataStore } from './query/loader'
-  import { loadMeta, type DefaultView, type Meta } from './lib/meta'
+  import { loadMeta, localizeSource, type DefaultView, type Meta } from './lib/meta'
   import { Explorer } from './lib/state.svelte'
   import { I18n, formatDate, formatMonth, themeLabel } from './lib/i18n'
   import { buildCsv, downloadBlob, downloadText, slug } from './lib/csv'
@@ -75,8 +75,10 @@
     if (!app) return []
     const ids = [...new Set(app.sourceIds.view.length ? app.sourceIds.view : app.sourceIds.series)]
     return ids.map((id) => app!.meta.sources.find((s) => id.includes(`/${s.hash}__`)))
-      .filter((s) => s !== undefined)
+      .filter((s) => s !== undefined).map((s) => localizeSource(s, app!.lang))
   })
+  /** IRCC/IRB's suppression note - Statistics Canada's estimates aren't suppressed. */
+  const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => s.portal !== 'statcan'))
 
   /** Download file name (without extension) describing the current view. */
   function fileBase(): string {
@@ -99,7 +101,7 @@
     const notes = [
       title + (percent ? (l === 'fr' ? ' (pourcentage du total)' : ' (percentage of total)') : ''),
       ...(partialNote ? [`* ${partialNote}`] : []),
-      i18n.t('suppression_note', l),
+      ...(suppressed ? [i18n.t('suppression_note', l)] : []),
       ...sourceTables.map((s) => `${l === 'fr' ? 'Source :' : 'Source:'} ${s!.agency}, "${s!.table_name}", ${s!.url}`),
       `${l === 'fr' ? 'Téléchargé de MigraScope le' : 'Downloaded from MigraScope on'} ${new Date().toISOString().slice(0, 10)}${l === 'fr' ? ' :' : ':'} ${location.href}`
     ]
@@ -126,7 +128,8 @@
     const subtitle = [`${gran}, ${years}`, ...(p.displayAs === 'percent' ? [i18n.t('percentage_total', l)] : [])].join(' · ')
     const agency = [...new Set(sourceTables.map((s) => s!.agency))].join(' / ')
     const sources = sourceTables.length
-      ? i18n.t('citation_source', l) + agency + i18n.t('citation_portal', l) +
+      ? i18n.t('citation_source', l) + agency +
+        i18n.t(sourceTables[0]!.portal === 'statcan' ? 'citation_portal_statcan' : 'citation_portal', l) +
         sourceTables.map((s) => `“${s!.table_name}”${i18n!.t('citation_last_updated', l, s!.updated_at)}`)
           .join(l === 'fr' ? ' ; ' : '; ') + '.'
       : ''
@@ -316,7 +319,7 @@
         {/if}
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}
-          {i18n.t('suppression_note', app.lang)}
+          {#if suppressed}{i18n.t('suppression_note', app.lang)}{/if}
         </p>
         <Citation viewIds={app.sourceIds.view} seriesIds={app.sourceIds.series} sources={app.meta.sources}
                   lang={app.lang} {i18n} />

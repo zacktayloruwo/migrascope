@@ -60,7 +60,8 @@ DATASET_LABELS <- c(
   study_permit_holders   = "Study Permit Holders",
   tr_to_pr_transition    = "TR → PR Transition",
   asylum_claimants       = "Asylum Claimants",
-  refugees               = "Refugees"
+  refugees               = "Refugees",
+  npr_population         = "Non-Permanent Resident Population"
 )
 
 # French twin of DATASET_LABELS, same `dataset` slugs as names. Sourced from
@@ -79,7 +80,8 @@ DATASET_LABELS_FR <- c(
   study_permit_holders   = "Titulaires d'un permis d'études",
   tr_to_pr_transition    = "Transition de résident temporaire à résident permanent",
   asylum_claimants       = "Demandeurs d'asile",
-  refugees               = "Réfugiés"
+  refugees               = "Réfugiés",
+  npr_population         = "Population de résidents non permanents"
 )
 
 # selectInput's named-vector convention is names = displayed label, values =

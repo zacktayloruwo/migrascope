@@ -1,4 +1,4 @@
-MigraScope visualise les statistiques canadiennes sur l'immigration et les réfugiés publiées en tant que données ouvertes par **Immigration, Réfugiés et Citoyenneté Canada (IRCC)** et la **Commission de l'immigration et du statut de réfugié du Canada (CISR)**. Choisissez ce qu'il faut afficher dans la phrase en haut de la page, ajustez les options en dessous, et le graphique se met à jour immédiatement.
+MigraScope visualise les statistiques canadiennes sur l'immigration et les réfugiés publiées en tant que données ouvertes par **Immigration, Réfugiés et Citoyenneté Canada (IRCC)**, la **Commission de l'immigration et du statut de réfugié du Canada (CISR)** et **Statistique Canada**. Choisissez ce qu'il faut afficher dans la phrase en haut de la page, ajustez les options en dessous, et le graphique se met à jour immédiatement.
 
 L'application a été créée par le Dr Zack Taylor, département de science politique, à l'Université Western Ontario, par frustration face à la création de graphiques ponctuels à partir de ces feuilles Excel.
 
@@ -10,6 +10,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 - **Transition de résident temporaire à résident permanent** — résidents temporaires devenus par la suite résidents permanents.
 - **Demandeurs d'asile** — personnes ayant présenté une demande d'asile au Canada.
 - **Réfugiés** — décisions de la Section de la protection des réfugiés (SPR) (acceptée / rejetée / autre résultat), combinant deux tableaux sources en une seule série continue de 1997 à 2026.
+- **Population de résidents non permanents** — estimations trimestrielles de Statistique Canada de toutes les personnes vivant au Canada avec un permis de travail ou d'études, des membres de leur famille, et des demandeurs d'asile, personnes protégées et groupes apparentés, depuis juillet 2021. Contrairement aux thèmes d'IRCC, qui comptent des permis et des demandes, ce thème compte des personnes, chacune dans un seul type. Chaque estimation est un stock, datée par Statistique Canada au premier jour d'un trimestre; elle est présentée à la fin du trimestre précédent (le 1er juillet comme juin, le 1er janvier comme décembre de l'année précédente), de sorte que la barre d'une année correspond à sa population au 31 décembre.
 
 #### Choisir ce qu'il faut afficher
 
@@ -37,7 +38,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 
 #### Source
 
-Les données proviennent du [Portail du gouvernement ouvert du Canada](https://ouvert.canada.ca/). Elles sont téléchargées périodiquement, traitées, puis publiées avec ce site sous forme de fichiers de données compacts que votre navigateur lit et met en graphique lui-même. Il ne s'agit pas d'une requête en direct sur les systèmes d'IRCC/CISR; la date du dernier téléchargement figure au bas de cette page.
+Les données d'IRCC et de la CISR proviennent du [Portail du gouvernement ouvert du Canada](https://ouvert.canada.ca/), et les estimations des résidents non permanents du [tableau 17-10-0121-01 de Statistique Canada](https://www150.statcan.gc.ca/t1/tbl1/fr/tv.action?pid=1710012101). Elles sont téléchargées périodiquement, traitées, puis publiées avec ce site sous forme de fichiers de données compacts que votre navigateur lit et met en graphique lui-même. Il ne s'agit pas d'une requête en direct sur les systèmes d'IRCC/CISR; la date du dernier téléchargement figure au bas de cette page.
 
 Un total de {{N_TABLES}} tableaux distincts sont inclus.
 
