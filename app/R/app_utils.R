@@ -478,6 +478,15 @@ table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_
   # regardless of what text fills it. A level that genuinely varies for a
   # branch elsewhere in the table (even if only one value shows up for a
   # specific geo/period slice) is left alone.
+  #
+  # A pad level is removed by shifting the levels below it up one place,
+  # not by blanking them: a pass-through level can sit above real
+  # categories. permanent_residents/5582034d nests Sponsored Family ->
+  # Sponsored Family -> Children / Parent or Grandparent / Spouse or
+  # Partner / Extended Family; blanking from the pad down gave all four
+  # the same key, and the max-merge in data-raw/08 then kept only Spouse
+  # or Partner (~21,000 admissions a year lost from Immigration Category).
+  # For a pad at the bottom of its branch the shift leaves NA, as before.
   for (i in MAX_BREAKDOWN_LEVELS:2) {
     parent_cols <- paste0("breakdown_", seq_len(i - 1))
     col <- paste0("breakdown_", i)
@@ -490,7 +499,10 @@ table_facet_leaf_rows <- function(con, table_id, n_levels, geo_positions, facet_
     branch_key <- function(x) do.call(paste, c(x[parent_cols], sep = "␟"))
     is_pad <- !is.na(d[[col]]) & branch_key(d) %in% branch_key(single_child)
     if (any(is_pad)) {
-      for (j in i:MAX_BREAKDOWN_LEVELS) d[[paste0("breakdown_", j)]][is_pad] <- NA_character_
+      for (j in i:MAX_BREAKDOWN_LEVELS) {
+        below <- if (j < MAX_BREAKDOWN_LEVELS) d[[paste0("breakdown_", j + 1)]][is_pad] else NA_character_
+        d[[paste0("breakdown_", j)]][is_pad] <- below
+      }
     }
   }
   d
