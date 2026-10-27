@@ -94,6 +94,26 @@ export class Explorer {
   granularityChoices = $derived<Granularity[]>(
     !this.scope?.has_month ? ['Annual'] : this.scope.quarterly_only ? ['Quarterly', 'Annual'] : GRANULARITIES)
 
+  private plotGranularity = $derived<Granularity>(
+    this.granularityChoices.includes(this.granularity) ? this.granularity : 'Annual')
+
+  /**
+   * The years this view can show. Monthly and Quarterly start at the first
+   * year with monthly data when earlier years are annual only.
+   */
+  yearBounds = $derived.by((): [number, number] => {
+    const s = this.scope
+    if (!s) return this.years
+    const first = this.plotGranularity !== 'Annual' && s.month_min_year ? s.month_min_year : s.min_year
+    return [first, s.max_year]
+  })
+
+  /** The chosen years, within what this view can show (`years` itself is kept for Annual). */
+  plotYears = $derived<[number, number]>([
+    Math.min(Math.max(this.years[0], this.yearBounds[0]), this.yearBounds[1]),
+    Math.max(Math.min(this.years[1], this.yearBounds[1]), this.yearBounds[0])
+  ])
+
   /** Percentage of a single unbroken bar is always 100% (app.R: setPercentAllowed). */
   percentAllowed = $derived(!(this.scope?.facet === 'Total' &&
     (this.geoLevel === 'national' || this.geoUnit !== 'All')))
@@ -126,8 +146,8 @@ export class Explorer {
     const drill2 = drill1 && this.drill2Needed && this.drill2 !== 'none' ? this.drill2 : null
     return {
       series: this.series, facet: s.facet, geoLevel: s.geo_level, geoDepth: s.geo_depth,
-      granularity: this.granularityChoices.includes(this.granularity) ? this.granularity : 'Annual',
-      years: this.years, isStock: s.is_stock, topN: this.topN,
+      granularity: this.plotGranularity,
+      years: this.plotYears, isStock: s.is_stock, topN: this.topN,
       displayAs: this.percentAllowed ? this.displayAs : 'absolute',
       geoUnitPrefix: this.geoLevel !== 'national' && this.geoUnit !== 'All' ? this.geoUnit.split(GEO_UNIT_SEP) : [],
       drill1, drill2

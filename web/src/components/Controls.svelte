@@ -15,7 +15,7 @@
   }
   const granKey: Record<Granularity, string> = { Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual' }
   const yearOptions = $derived(app.scope
-    ? Array.from({ length: app.scope.max_year - app.scope.min_year + 1 }, (_, i) => app.scope!.min_year + i)
+    ? Array.from({ length: app.yearBounds[1] - app.yearBounds[0] + 1 }, (_, i) => app.yearBounds[0] + i)
     : [])
   const themes = $derived(THEMES.filter((t) => app.meta.summary.some((r) => r.theme === t.id)))
   const unavailable = $derived(GEO_LEVELS.filter((g) => !app.geoAvailable.has(g)))
@@ -120,13 +120,13 @@
     <div class="group">
       <span class="label" id="lbl-years">{i18n.t('year_range_label', l)}</span>
       <div class="years">
-        <select aria-label={l === 'fr' ? 'Première année' : 'First year'} value={app.years[0]}
-                onchange={(e) => app.setYears(Number(e.currentTarget.value), app.years[1])}>
+        <select aria-label={l === 'fr' ? 'Première année' : 'First year'} value={app.plotYears[0]}
+                onchange={(e) => app.setYears(Number(e.currentTarget.value), app.plotYears[1])}>
           {#each yearOptions as y (y)}<option value={y}>{y}</option>{/each}
         </select>
         <span class="arrow" aria-hidden="true">→</span>
-        <select aria-label={l === 'fr' ? 'Dernière année' : 'Last year'} value={app.years[1]}
-                onchange={(e) => app.setYears(app.years[0], Number(e.currentTarget.value))}>
+        <select aria-label={l === 'fr' ? 'Dernière année' : 'Last year'} value={app.plotYears[1]}
+                onchange={(e) => app.setYears(app.plotYears[0], Number(e.currentTarget.value))}>
           {#each yearOptions as y (y)}<option value={y}>{y}</option>{/each}
         </select>
       </div>

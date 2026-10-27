@@ -4,7 +4,7 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 #### Themes
 
-- **Permanent Residents** — admissions of new permanent residents.
+- **Permanent Residents** — admissions of new permanent residents. *All admissions* reaches back to 2000, by province/territory, immigration category, age group, gender and country of citizenship: the years before 2015 come from IRCC's [ad hoc research extracts](https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990), which are annual and national only (Monthly and Quarterly views start in 2015) and use the same categories. One category exists only before 2015: sponsored family members admitted on humanitarian and compassionate grounds.
 - **International Mobility Program** / **Temporary Foreign Worker Program** — the two temporary work permit programs, shown separately since they're administratively distinct.
 - **Study Permit Holders** — international students holding a study permit.
 - **TR → PR Transition** — temporary residents who went on to become permanent residents.

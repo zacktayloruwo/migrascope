@@ -4,7 +4,7 @@ L'application a été créée par le Dr Zack Taylor, département de science pol
 
 #### Thèmes
 
-- **Résidents permanents** — admissions de nouveaux résidents permanents.
+- **Résidents permanents** — admissions de nouveaux résidents permanents. *Toutes les admissions* remontent à 2000, par province ou territoire, catégorie d'immigration, groupe d'âge, genre et pays de citoyenneté : les années antérieures à 2015 proviennent des [extractions de recherche ponctuelles](https://ouvert.canada.ca/data/fr/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990) d'IRCC, qui sont annuelles et nationales seulement (les vues mensuelle et trimestrielle commencent en 2015) et utilisent les mêmes catégories. Une catégorie n'existe qu'avant 2015 : les membres de la famille parrainés admis pour des considérations d'ordre humanitaire.
 - **Programme de mobilité internationale** / **Programme des travailleurs étrangers temporaires** — les deux programmes de permis de travail temporaire, présentés séparément puisqu'ils sont administrativement distincts.
 - **Titulaires d'un permis d'études** — étudiants internationaux titulaires d'un permis d'études.
 - **Transition de résident temporaire à résident permanent** — résidents temporaires devenus par la suite résidents permanents.

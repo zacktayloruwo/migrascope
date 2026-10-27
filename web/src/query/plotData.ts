@@ -156,6 +156,8 @@ export function fetchSeriesRows(cols: SeriesFactsColumns, p: ViewParams, facetOv
     if (!ok) continue
     if (drill1 != null && cols.breakdown_1[i] !== drill1) continue
     if (drill2 != null && cols.breakdown_2[i] !== drill2) continue
+    // R: drilled in, a row with nothing at the next level isn't part of that breakdown
+    if (drill1 != null && categoryOf(i) == null) continue
     out.push({
       entity: [cols.geo_1[i], cols.geo_2[i], cols.geo_3[i], cols.breakdown_1[i], cols.breakdown_2[i],
                cols.breakdown_3[i]].map((x) => x ?? '').join(GEO_UNIT_SEP),

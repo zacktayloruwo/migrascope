@@ -65,6 +65,8 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
 
 10. **`data-raw/09b_add_statcan_npr.R`** — adds the Non-Permanent Resident Population theme from Statistics Canada table [17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101), which isn't on the Open Government Portal and so bypasses steps 1–9. It downloads the table's English and French CSVs (skipped when StatCan's release time is unchanged), checks that types add up to their groups and provinces to Canada, appends its rows to `series_facts` and its French labels to `category_translations`, and writes `app/data/statcan_sources.csv` for the citation. Its quarterly estimates (dated the first day of a quarter) are stored as stocks at the end of the previous quarter, so a year's figure is its December 31 count. `08` and `09_build_translations.R` rewrite those tables, so re-run this after either; `10_export_web.R` stops if the theme is missing.
 
+11. **`data-raw/09c_add_pre2015.R`** — extends Permanent Residents › All admissions back to 2000 from IRCC's frozen [Specialized Research Datasets](https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990) (annual, national; province/territory for the Total). It writes 2000–2014 only, as `period_type = 'year'` rows, for Total, Immigration Category, Age Group, Gender and Country of Citizenship. Labels are mapped onto the post-2015 ones (an unmapped label stops the script), and the files' 2015 figures must match the monthly tables' (totals within 2%, categories of 5,000+ within 10%) before anything is written. It also adds one French label and writes `app/data/pre2015_sources.csv` for the citations. Re-run after `08`/`09`, like `09b`; `10_export_web.R` stops if the rows are missing.
+
 Run from the project root:
 
 ``` r
@@ -78,6 +80,7 @@ source("data-raw/06_build_label_lookups.R")
 source("data-raw/07_build_series_reference.R")
 source("data-raw/08_build_series_facts.R")
 source("data-raw/09b_add_statcan_npr.R")   # Statistics Canada non-permanent residents theme (re-run after 08/09)
+source("data-raw/09c_add_pre2015.R")       # permanent residents 2000-2014 (re-run after 08/09)
 source("data-raw/10_export_web.R")         # Parquet + JSON for the static web app (web/), see docs/wasm-port-plan.md
 source("data-raw/11_export_golden.R")      # golden files for the web app's parity tests (cd web && npm test)
 ```

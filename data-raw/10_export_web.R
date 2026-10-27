@@ -48,6 +48,10 @@ if (file.exists("app/data/statcan_sources.csv") &&
     dbGetQuery(con, "SELECT count(*) AS n FROM series_facts WHERE theme = 'npr_population'")$n == 0) {
   stop("series_facts has no npr_population rows - run data-raw/09b_add_statcan_npr.R after 08/09")
 }
+if (file.exists("app/data/pre2015_sources.csv") &&
+    dbGetQuery(con, "SELECT count(*) AS n FROM series_facts WHERE theme = 'permanent_residents' AND period_year < 2015")$n == 0) {
+  stop("series_facts has no pre-2015 permanent_residents rows - run data-raw/09c_add_pre2015.R after 08/09")
+}
 
 unlink(OUT_DIR, recursive = TRUE)
 dir.create(file.path(OUT_DIR, "views"), recursive = TRUE)
@@ -100,12 +104,16 @@ parquet_files <- lapply(seq_len(nrow(part_rows)), function(i) {
 series_summary <- build_series_summary(con)
 # Monthly rows only at quarter ends (Statistics Canada's quarterly estimates,
 # data-raw/09b): the explorer offers Quarterly and Annual, not Monthly.
-quarterly_only <- dbGetQuery(con, "
-  SELECT theme, series, facet, geo_level, bool_and(period_month IN (3, 6, 9, 12)) AS quarterly_only
+# month_min_year: the first year with monthly rows, where the Monthly and
+# Quarterly views start when earlier years are annual only (data-raw/09c).
+monthly <- dbGetQuery(con, "
+  SELECT theme, series, facet, geo_level, bool_and(period_month IN (3, 6, 9, 12)) AS quarterly_only,
+         min(period_year)::INTEGER AS month_min_year
   FROM series_facts WHERE period_type = 'month' GROUP BY ALL")
 series_summary <- series_summary |>
-  left_join(quarterly_only, by = c("theme", "series", "facet", "geo_level")) |>
-  mutate(quarterly_only = coalesce(quarterly_only, FALSE))
+  left_join(monthly, by = c("theme", "series", "facet", "geo_level")) |>
+  mutate(quarterly_only = coalesce(quarterly_only, FALSE),
+         month_min_year = ifelse(!is.na(month_min_year) & month_min_year > min_year, month_min_year, NA_integer_))
 write_json(series_summary, "series_summary.json")
 
 geo_rows <- series_summary[series_summary$geo_level != "National", , drop = FALSE]
@@ -244,7 +252,11 @@ write_json(list(
 statcan_sources <- if (file.exists("app/data/statcan_sources.csv")) {
   readr::read_csv("app/data/statcan_sources.csv", show_col_types = FALSE, col_types = readr::cols(.default = "c"))
 } else NULL
-n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n + NROW(statcan_sources)
+# Neither are IRCC's pre-2015 extracts (data-raw/09c_add_pre2015.R).
+pre2015_sources <- if (file.exists("app/data/pre2015_sources.csv")) {
+  readr::read_csv("app/data/pre2015_sources.csv", show_col_types = FALSE, col_types = readr::cols(last_modified_ckan = "c"))
+} else NULL
+n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n + NROW(statcan_sources) + NROW(pre2015_sources)
 for (lang in c("en", "fr")) {
   src <- if (lang == "en") "app/ABOUT.md" else "app/ABOUT_fr.md"
   md <- gsub("{{N_TABLES}}", n_tables, paste(readLines(src, warn = FALSE), collapse = "\n"), fixed = TRUE)
@@ -255,7 +267,7 @@ manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types =
                                 col_types = readr::cols(last_modified_ckan = "c"))
 # `portal` picks the citation wording: Open Government Portal (IRCC/IRB) or Statistics Canada.
 sources <- bind_rows(
-  build_source_lookup(manifest_csv) |> mutate(portal = "open_canada"),
+  build_source_lookup(bind_rows(manifest_csv, pre2015_sources)) |> mutate(portal = "open_canada"),
   if (!is.null(statcan_sources)) statcan_sources |>
     transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "statcan",
               agency_fr, table_name_fr, dataset_url_fr)

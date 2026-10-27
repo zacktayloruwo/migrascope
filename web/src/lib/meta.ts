@@ -17,6 +17,8 @@ export interface SummaryRow {
   has_month: boolean
   /** Monthly rows only at quarter ends (quarterly source): no Monthly view. */
   quarterly_only?: boolean
+  /** First year with monthly rows, when earlier years are annual only (pre-2015 extracts). */
+  month_min_year?: number | null
   is_stock: boolean
   min_year: number
   max_year: number

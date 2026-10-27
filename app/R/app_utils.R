@@ -1245,6 +1245,10 @@ fetch_series_rows <- function(con, theme, series, facet, geo_level, geo_depth, y
   } else {
     d$category <- d$breakdown_1
   }
+  # Drilled in, a row with nothing at the next level isn't part of that
+  # breakdown - e.g. pre-2015 citizenship rows (data-raw/09c), which aren't
+  # split by immigration category - so it's left out rather than shown as NA.
+  if (!is.null(drill_1)) d <- d[!is.na(d$category), , drop = FALSE]
 
   d[c("entity_id", "category", "period_year", "period_quarter", "period_month", "value")]
 }
