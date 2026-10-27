@@ -178,14 +178,21 @@ export class Explorer {
     }
   }
 
-  /** Source tables behind the current view (app.R: series_source_table_ids()). */
   /** Plotted periods with incomplete data (e.g. 2026 to July): asterisked and described in the Note. */
   partial = $derived.by((): PartialPeriod[] =>
     this.colsReady && this.params ? partialPeriods(this.cols!, this.params, this.meta.dataThrough) : [])
 
+  /**
+   * Source tables behind the current view (app.R: series_source_table_ids()):
+   * the facet's tables for the plotted years, plus the Total's when the chart
+   * computes a Suppressed Residual from it (a breakdown that isn't drilled into).
+   */
   sourceIds = $derived.by(() => {
-    if (!this.colsReady || !this.scope) return { view: [] as string[], series: [] as string[] }
-    return { view: sourceTableIds(this.cols!, this.series, this.scope.facet), series: sourceTableIds(this.cols!, this.series) }
+    if (!this.colsReady || !this.scope || !this.params) return { view: [] as string[], series: [] as string[] }
+    const p = this.params
+    const view = sourceTableIds(this.cols!, this.series, p.facet, p.years)
+    const total = p.facet !== 'Total' && p.drill1 == null ? sourceTableIds(this.cols!, this.series, 'Total', p.years) : []
+    return { view: [...new Set([...view, ...total])], series: sourceTableIds(this.cols!, this.series) }
   })
 
   // ---- actions (app.R's observers, in a fixed order) ----------------------------------

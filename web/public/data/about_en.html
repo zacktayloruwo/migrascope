@@ -2,9 +2,9 @@
 <p>The app was created by Dr. Zack Taylor, Dept. of Political Science, at the University of Western Ontario out of frustration with making ad hoc plots from these Excel sheets.</p>
 <h4>Themes</h4>
 <ul>
-<li><strong>Permanent Residents</strong> — admissions of new permanent residents. <em>All admissions</em> reaches back to 2000, by province/territory, immigration category, age group, gender and country of citizenship: the years before 2015 come from IRCC's <a href="https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990">ad hoc research extracts</a>, which are annual and national only (Monthly and Quarterly views start in 2015) and use the same categories. One category exists only before 2015: sponsored family members admitted on humanitarian and compassionate grounds.</li>
+<li><strong>Permanent Residents</strong> — admissions of new permanent residents. <em>All admissions</em> reaches back to 2000 (see &quot;Data before 2015&quot; below).</li>
 <li><strong>International Mobility Program</strong> / <strong>Temporary Foreign Worker Program</strong> — the two temporary work permit programs, shown separately since they're administratively distinct.</li>
-<li><strong>Study Permit Holders</strong> — international students holding a study permit.</li>
+<li><strong>Study Permit Holders</strong> — international students holding a study permit. <em>All permits (Year became effective)</em> reaches back to 2004 (see &quot;Data before 2015&quot; below).</li>
 <li><strong>TR → PR Transition</strong> — temporary residents who went on to become permanent residents.</li>
 <li><strong>Asylum Claimants</strong> — persons who made a refugee claim inside Canada.</li>
 <li><strong>Refugees</strong> — Refugee Protection Division (RPD) decisions (accepted / rejected / other outcome), combining two source tables into one continuous 1997–2026 series.</li>
@@ -32,11 +32,28 @@
 <li>IRCC/IRB suppress (&quot;--&quot;) any cell value between 0 and 5 to protect individual privacy. Suppressed cells are excluded from sums, so totals may be slightly understated, likely more so for finely broken-down tables (e.g. by country) than coarser ones (e.g. by province), since finer tables have many more small cells to suppress. In some cases, suppression lowers the overall total by as much as 13%.</li>
 <li>IRCC rounds its published values to multiples of 5; IRB's refugee decision counts are not rounded.</li>
 <li>Exception: IRCC publishes the adoptions table (Permanent Residents › Adoptions via PR) without rounding or suppression, so it includes exact counts from 1 to 4.</li>
-<li>The citation under each chart names the original source table(s), when IRCC/IRB last updated them, and when you accessed them.</li>
+<li>The citation under each chart names the original source table(s) behind the years shown, when IRCC/IRB last updated them, and when you accessed them. When the chart includes a Suppressed Residual, the table(s) holding the published total are cited too.</li>
 </ul>
+<h4>Data before 2015</h4>
+<p>IRCC's monthly open data tables start in January 2015. For two series, earlier years come from one-off extracts IRCC published on the Open Government Portal in 2016–2017 and has not updated since:</p>
+<ul>
+<li><strong>Permanent Residents › All admissions</strong>, 2000–2014 — from the <a href="https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990">Specialized Research Datasets: Permanent Residents</a>: Canada by immigration category, age group, gender and country of citizenship, and the total by province/territory. The total by Census Metropolitan Area, 2006–2014, comes from <a href="https://open.canada.ca/data/en/dataset/ad975a26-df23-456a-8ada-756191a23695">Permanent Residents – Ad Hoc</a>.</li>
+<li><strong>Study Permit Holders › All permits (Year became effective)</strong>, 2004–2014 — from <a href="https://open.canada.ca/data/en/dataset/b813dcb6-cc08-4e06-97d4-85b7e4daa822">Study Permit Holders – Ad Hoc</a>: the total and gender for Canada and each province/territory, and country of citizenship for Canada.</li>
+</ul>
+<p>How the two sources are joined:</p>
+<ul>
+<li><strong>Each source covers its own years.</strong> The extracts supply only the years before 2015; every year from 2015 on comes from the monthly tables. No year mixes the two.</li>
+<li><strong>The overlap is checked first.</strong> The extracts also cover 2015, so their 2015 figures are compared with the monthly tables' before anything is joined. Each extract's total must be within 2% of the published 2015 total (3% for study permits), and every category or place with at least 5,000 admissions (2,000 students) within 10%. In the data now shown, permanent resident totals agree within 0.02% and the largest category gap is 3.4%. The study permit extract counts 2.7% fewer students in 2015 than the current tables: it was taken in March 2016, and IRCC has revised its figures since.</li>
+<li><strong>Annual figures only.</strong> The extracts give one figure per year, so Monthly and Quarterly views start in 2015 and only the Annual view reaches further back.</li>
+<li><strong>Same categories.</strong> Each label is matched to the one used from 2015 on, for example &quot;Hong Kong&quot; to &quot;Hong Kong SAR&quot;. Where the current tables are less detailed, the older detail is added up to their level: the three kinds of protected persons in Canada become &quot;Protected Person in Canada&quot;, and the six kinds of &quot;All Other Immigration&quot; are combined. One category has no current equivalent and is kept as it is: <em>Sponsored Family Member – H&amp;C Consideration</em> (2002–2014), family members sponsored on humanitarian and compassionate grounds. It is a different group from the &quot;Humanitarian &amp; Compassionate&quot; admissions within All Other Immigration.</li>
+<li><strong>Places.</strong> Census agglomerations listed separately in the older CMA table but not in the current one (Leamington, Cold Lake, Saint-Jean-sur-Richelieu, Temiskaming Shores) are counted in &quot;Other – <province>&quot;, as they are from 2015 on; Belleville is shown under its current name, Belleville – Quinte West. Study permits for Canada by country of citizenship add up the provinces, which can count a student who studied in two provinces twice (under 0.2% of the total).</li>
+<li><strong>Breakdowns that start in 2015.</strong> The extracts don't split countries of citizenship by immigration category, so drilling into a country shows 2015 on only. Students whose province was not stated are in the total but not the gender breakdown, as in the current tables.</li>
+<li><strong>Captions.</strong> Whenever a chart uses the extracts, its note says so, and the citation lists the extract tables alongside the monthly tables.</li>
+</ul>
+<p>Not yet included: occupations before 2015 (the extracts group non-workers differently from the current tables) and immigration category by province (the extracts use an older set of categories that doesn't map onto the current one).</p>
 <h4>Source</h4>
-<p>The IRCC and IRB data comes from the <a href="https://open.canada.ca/">Government of Canada Open Data Portal</a>, and the non-permanent resident estimates from <a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101">Statistics Canada table 17-10-0121-01</a>. It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.</p>
-<p>A total of 77 distinct tables are included.</p>
+<p>The IRCC and IRB data comes from the <a href="https://open.canada.ca/">Government of Canada Open Data Portal</a> (including IRCC's pre-2015 extracts, above), and the non-permanent resident estimates from <a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101">Statistics Canada table 17-10-0121-01</a>. It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.</p>
+<p>A total of 80 distinct tables are included.</p>
 <p>Where several open data tables contain equivalent information, the one with the least suppressed data is used. This is always the Excel file when both an Excel and a CSV file exist.</p>
 <h4>For more information</h4>
 <p>For more information, contact Zack Taylor at <a href="mailto:zack.taylor@uwo.ca">zack.taylor@uwo.ca</a>.</p>

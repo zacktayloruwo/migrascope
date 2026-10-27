@@ -79,6 +79,8 @@
   })
   /** IRCC/IRB's suppression note - Statistics Canada's estimates aren't suppressed. */
   const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => s.portal !== 'statcan'))
+  /** The view joins IRCC's pre-2015 extracts to the monthly tables (data-raw/09c). */
+  const spliced = $derived(sourceTables.some((s) => s.historical))
 
   /** Download file name (without extension) describing the current view. */
   function fileBase(): string {
@@ -102,7 +104,9 @@
       title + (percent ? (l === 'fr' ? ' (pourcentage du total)' : ' (percentage of total)') : ''),
       ...(partialNote ? [`* ${partialNote}`] : []),
       ...(suppressed ? [i18n.t('suppression_note', l)] : []),
-      ...sourceTables.map((s) => `${l === 'fr' ? 'Source :' : 'Source:'} ${s!.agency}, "${s!.table_name}", ${s!.url}`),
+      ...(spliced ? [i18n.t('splice_note', l)] : []),
+      ...sourceTables.map((s) => `${l === 'fr' ? 'Source :' : 'Source:'} ${s!.agency}, "${s!.table_name}", ` +
+        `${s!.url}${i18n!.t('citation_last_updated', l, s!.updated_at)} (${s!.dataset_url})`),
       `${l === 'fr' ? 'Téléchargé de MigraScope le' : 'Downloaded from MigraScope on'} ${new Date().toISOString().slice(0, 10)}${l === 'fr' ? ' :' : ':'} ${location.href}`
     ]
     const csv = buildCsv(data, {
@@ -137,7 +141,8 @@
     const residual = app.plotData?.rows.some((r) => r.category === 'Suppressed Residual') &&
       !hiddenCategories.has(i18n.category('Suppressed Residual', l))
     const notes = [...(partialNote ? [`* ${partialNote}`] : []),
-      ...(residual ? [i18n.t('suppression_note', l)] : []), ...(sources ? [sources] : [])]
+      ...(residual ? [i18n.t('suppression_note', l)] : []), ...(spliced ? [i18n.t('splice_note', l)] : []),
+      ...(sources ? [sources] : [])]
     const url = new URL('.', location.href).href.replace(/^https?:\/\//, '').replace(/\/$/, '')
     exportingPng = true
     try {
@@ -320,6 +325,7 @@
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}
           {#if suppressed}{i18n.t('suppression_note', app.lang)}{/if}
+          {#if spliced}{i18n.t('splice_note', app.lang)}{/if}
         </p>
         <Citation viewIds={app.sourceIds.view} seriesIds={app.sourceIds.series} sources={app.meta.sources}
                   lang={app.lang} {i18n} />

@@ -373,11 +373,14 @@ export function listBreakdownValues(cols: SeriesFactsColumns, series: string, fa
   return [...seen].sort(icu.compare)
 }
 
-/** Distinct source tables behind a view, for its citation. */
-export function sourceTableIds(cols: SeriesFactsColumns, series: string, facet?: string): string[] {
+/** Distinct source tables behind a view, for its citation - within `years` when given. */
+export function sourceTableIds(cols: SeriesFactsColumns, series: string, facet?: string,
+                               years?: [number, number]): string[] {
   const seen = new Set<string>()
   for (let i = 0; i < cols.length; i++) {
     if (cols.series[i] !== series || (facet !== undefined && cols.facet[i] !== facet)) continue
+    const year = cols.period_year[i]
+    if (years && (year == null || year < years[0] || year > years[1])) continue
     const id = cols.source_table_id[i]
     if (id != null) seen.add(id)
   }

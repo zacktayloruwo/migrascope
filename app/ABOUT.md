@@ -4,9 +4,9 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 
 #### Themes
 
-- **Permanent Residents** — admissions of new permanent residents. *All admissions* reaches back to 2000, by province/territory, immigration category, age group, gender and country of citizenship: the years before 2015 come from IRCC's [ad hoc research extracts](https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990), which are annual and national only (Monthly and Quarterly views start in 2015) and use the same categories. One category exists only before 2015: sponsored family members admitted on humanitarian and compassionate grounds.
+- **Permanent Residents** — admissions of new permanent residents. *All admissions* reaches back to 2000 (see "Data before 2015" below).
 - **International Mobility Program** / **Temporary Foreign Worker Program** — the two temporary work permit programs, shown separately since they're administratively distinct.
-- **Study Permit Holders** — international students holding a study permit.
+- **Study Permit Holders** — international students holding a study permit. *All permits (Year became effective)* reaches back to 2004 (see "Data before 2015" below).
 - **TR → PR Transition** — temporary residents who went on to become permanent residents.
 - **Asylum Claimants** — persons who made a refugee claim inside Canada.
 - **Refugees** — Refugee Protection Division (RPD) decisions (accepted / rejected / other outcome), combining two source tables into one continuous 1997–2026 series.
@@ -34,11 +34,30 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 - IRCC/IRB suppress ("--") any cell value between 0 and 5 to protect individual privacy. Suppressed cells are excluded from sums, so totals may be slightly understated, likely more so for finely broken-down tables (e.g. by country) than coarser ones (e.g. by province), since finer tables have many more small cells to suppress. In some cases, suppression lowers the overall total by as much as 13%.
 - IRCC rounds its published values to multiples of 5; IRB's refugee decision counts are not rounded.
 - Exception: IRCC publishes the adoptions table (Permanent Residents › Adoptions via PR) without rounding or suppression, so it includes exact counts from 1 to 4.
-- The citation under each chart names the original source table(s), when IRCC/IRB last updated them, and when you accessed them.
+- The citation under each chart names the original source table(s) behind the years shown, when IRCC/IRB last updated them, and when you accessed them. When the chart includes a Suppressed Residual, the table(s) holding the published total are cited too.
+
+#### Data before 2015
+
+IRCC's monthly open data tables start in January 2015. For two series, earlier years come from one-off extracts IRCC published on the Open Government Portal in 2016–2017 and has not updated since:
+
+- **Permanent Residents › All admissions**, 2000–2014 — from the [Specialized Research Datasets: Permanent Residents](https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990): Canada by immigration category, age group, gender and country of citizenship, and the total by province/territory. The total by Census Metropolitan Area, 2006–2014, comes from [Permanent Residents – Ad Hoc](https://open.canada.ca/data/en/dataset/ad975a26-df23-456a-8ada-756191a23695).
+- **Study Permit Holders › All permits (Year became effective)**, 2004–2014 — from [Study Permit Holders – Ad Hoc](https://open.canada.ca/data/en/dataset/b813dcb6-cc08-4e06-97d4-85b7e4daa822): the total and gender for Canada and each province/territory, and country of citizenship for Canada.
+
+How the two sources are joined:
+
+- **Each source covers its own years.** The extracts supply only the years before 2015; every year from 2015 on comes from the monthly tables. No year mixes the two.
+- **The overlap is checked first.** The extracts also cover 2015, so their 2015 figures are compared with the monthly tables' before anything is joined. Each extract's total must be within 2% of the published 2015 total (3% for study permits), and every category or place with at least 5,000 admissions (2,000 students) within 10%. In the data now shown, permanent resident totals agree within 0.02% and the largest category gap is 3.4%. The study permit extract counts 2.7% fewer students in 2015 than the current tables: it was taken in March 2016, and IRCC has revised its figures since.
+- **Annual figures only.** The extracts give one figure per year, so Monthly and Quarterly views start in 2015 and only the Annual view reaches further back.
+- **Same categories.** Each label is matched to the one used from 2015 on, for example "Hong Kong" to "Hong Kong SAR". Where the current tables are less detailed, the older detail is added up to their level: the three kinds of protected persons in Canada become "Protected Person in Canada", and the six kinds of "All Other Immigration" are combined. One category has no current equivalent and is kept as it is: *Sponsored Family Member – H&C Consideration* (2002–2014), family members sponsored on humanitarian and compassionate grounds. It is a different group from the "Humanitarian & Compassionate" admissions within All Other Immigration.
+- **Places.** Census agglomerations listed separately in the older CMA table but not in the current one (Leamington, Cold Lake, Saint-Jean-sur-Richelieu, Temiskaming Shores) are counted in "Other – <province>", as they are from 2015 on; Belleville is shown under its current name, Belleville – Quinte West. Study permits for Canada by country of citizenship add up the provinces, which can count a student who studied in two provinces twice (under 0.2% of the total).
+- **Breakdowns that start in 2015.** The extracts don't split countries of citizenship by immigration category, so drilling into a country shows 2015 on only. Students whose province was not stated are in the total but not the gender breakdown, as in the current tables.
+- **Captions.** Whenever a chart uses the extracts, its note says so, and the citation lists the extract tables alongside the monthly tables.
+
+Not yet included: occupations before 2015 (the extracts group non-workers differently from the current tables) and immigration category by province (the extracts use an older set of categories that doesn't map onto the current one).
 
 #### Source
 
-The IRCC and IRB data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/), and the non-permanent resident estimates from [Statistics Canada table 17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101). It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
+The IRCC and IRB data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/) (including IRCC's pre-2015 extracts, above), and the non-permanent resident estimates from [Statistics Canada table 17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101). It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
 
 A total of {{N_TABLES}} distinct tables are included.
 

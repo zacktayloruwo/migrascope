@@ -135,6 +135,17 @@ STRINGS <- list(
                 "affichées et la valeur totale contenue dans les données source.")
   ),
 
+  # Shown when a view draws on IRCC's pre-2015 ad hoc extracts (data-raw/09c).
+  splice_note        = c(
+    en = paste0("Years before 2015 come from IRCC's ad hoc research extracts (published 2016–2017; ",
+                "annual figures only), later years from IRCC's monthly tables. The extracts' 2015 ",
+                "figures were checked against the monthly tables before the two were joined; see About."),
+    fr = paste0("Les années antérieures à 2015 proviennent des extractions de recherche ponctuelles ",
+                "d'IRCC (publiées en 2016–2017; chiffres annuels seulement), les années suivantes des ",
+                "tableaux mensuels d'IRCC. Les chiffres de 2015 des extractions ont été comparés à ceux ",
+                "des tableaux mensuels avant de joindre les deux sources; voir À propos.")
+  ),
+
   no_data            = c(en = "No data for this selection.",
                           fr = "Aucune donnée pour cette sélection."),
   stock_suffix       = c(en = "— point-in-time snapshot, not summed across months",

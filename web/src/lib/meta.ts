@@ -44,6 +44,8 @@ export interface SourceRecord {
   updated_at: string
   /** Citation wording: IRCC/IRB files on the Open Government Portal, or a Statistics Canada table. */
   portal?: 'open_canada' | 'statcan'
+  /** One of IRCC's frozen pre-2015 ad hoc extracts (data-raw/09c): the caption says where it's joined. */
+  historical?: boolean
   /** French names, where the source publishes them (Statistics Canada). */
   agency_fr?: string
   table_name_fr?: string

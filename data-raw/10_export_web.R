@@ -267,7 +267,9 @@ manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types =
                                 col_types = readr::cols(last_modified_ckan = "c"))
 # `portal` picks the citation wording: Open Government Portal (IRCC/IRB) or Statistics Canada.
 sources <- bind_rows(
-  build_source_lookup(bind_rows(manifest_csv, pre2015_sources)) |> mutate(portal = "open_canada"),
+  build_source_lookup(bind_rows(manifest_csv, pre2015_sources)) |>
+    mutate(portal = "open_canada",
+           historical = ifelse(hash %in% substr(pre2015_sources$resource_id, 1, 8), TRUE, NA)),
   if (!is.null(statcan_sources)) statcan_sources |>
     transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "statcan",
               agency_fr, table_name_fr, dataset_url_fr)
