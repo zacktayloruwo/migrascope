@@ -53,7 +53,10 @@ Comment les deux sources sont jointes :
 - **Répartitions qui commencent en 2015.** Les extractions ne répartissent pas les pays de citoyenneté par catégorie d'immigration; explorer un pays n'affiche donc que les années à partir de 2015. Les étudiants dont la province n'est pas précisée figurent dans le total, mais pas dans la répartition par genre, comme dans les tableaux actuels.
 - **Légendes.** Chaque fois qu'un graphique utilise les extractions, sa note le précise et la citation énumère les tableaux d'extraction avec les tableaux mensuels.
 
-Pas encore inclus : les professions avant 2015 (les extractions regroupent les personnes qui ne travaillent pas autrement que les tableaux actuels) et la catégorie d'immigration par province (les extractions utilisent un ancien ensemble de catégories qui ne correspond pas à l'actuel).
+Exclus délibérément :
+
+- **La profession envisagée avant 2015.** Les professions précises des extractions (codes CNP à 4 chiffres) correspondent à celles des tableaux actuels, mais la catégorie regroupant toutes les personnes sans profession précise (surtout des personnes qui n'ont pas l'intention de travailler : enfants, conjoints accompagnateurs, étudiants, retraités) est définie autrement. En 2015, elle compte 76 % des admissions dans les extractions, mais 56 % dans les tableaux actuels, qui en perdent un autre quart à la censure. Une fois jointes, le graphique montrerait en 2015 un changement qui ne serait qu'un changement de source; la profession commence donc en 2015.
+- **La catégorie d'immigration par province ou territoire avant 2015.** La seule extraction par province utilise un ancien ensemble de catégories qui ne correspond pas à l'actuel (par exemple, les membres de la famille parrainés pour des considérations d'ordre humanitaire y sont comptés parmi les « autres immigrants » plutôt que dans la famille); la répartition provinciale commence donc en 2015.
 
 #### Source
 

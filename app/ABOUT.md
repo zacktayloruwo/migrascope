@@ -53,7 +53,10 @@ How the two sources are joined:
 - **Breakdowns that start in 2015.** The extracts don't split countries of citizenship by immigration category, so drilling into a country shows 2015 on only. Students whose province was not stated are in the total but not the gender breakdown, as in the current tables.
 - **Captions.** Whenever a chart uses the extracts, its note says so, and the citation lists the extract tables alongside the monthly tables.
 
-Not yet included: occupations before 2015 (the extracts group non-workers differently from the current tables) and immigration category by province (the extracts use an older set of categories that doesn't map onto the current one).
+Left out on purpose:
+
+- **Intended occupation before 2015.** The extracts' specific occupations (4-digit NOC codes) match the current tables, but the bucket for everyone without one (mainly people not intending to work: children, accompanying spouses, students, retirees) is defined differently. In 2015 it holds 76% of admissions in the extracts but 56% in the current tables, which lose another quarter to suppression. Joined, the chart would show a change at 2015 that is only a change of source, so occupation starts in 2015.
+- **Immigration category by province/territory before 2015.** The only extract by province uses an older set of categories that doesn't map onto the current one (for example, family members sponsored on humanitarian and compassionate grounds are counted under "Other immigrants" rather than family), so the provincial breakdown starts in 2015.
 
 #### Source
 
