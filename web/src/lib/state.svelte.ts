@@ -44,6 +44,8 @@ export class Explorer {
   years = $state<[number, number]>([2015, 2026])
   displayAs = $state<'absolute' | 'percent'>('absolute')
   topN = $state(10)
+  /** The pool's score ranges by draw: see-through dots, or stacked bars (the card's toggle). */
+  drawStyle = $state<'dots' | 'bars'>('dots')
 
   /** Decoded partition for (theme, scope's geo level), and which one it is. */
   cols = $state.raw<SeriesFactsColumns | null>(null)
@@ -169,6 +171,12 @@ export class Explorer {
     if (this.isProvinceView) return orderWestToEast(data)
     return isScoreRangeView(data) ? orderScoreRanges(data) : data
   })
+
+  /** A draw-by-draw view whose categories are score ranges - the one with a dots/bars toggle. */
+  scoreDrawView = $derived(this.params?.granularity === 'Draw' && !!this.plotData && isScoreRangeView(this.plotData))
+
+  /** How the chart draws a draw-by-draw view: the toggle for score ranges, dots otherwise. */
+  drawMode = $derived<'dots' | 'bars'>(this.scoreDrawView ? this.drawStyle : 'dots')
 
   /** The theme's pre-aggregated view, if the current inputs are exactly the ones it was built for. */
   private pendingDefault(): PlotData | null {
@@ -316,6 +324,7 @@ export class Explorer {
     p.set('y', `${this.years[0]}-${this.years[1]}`)
     if (this.displayAs === 'percent') p.set('pct', '1')
     if (this.topN !== 10) p.set('n', String(this.topN))
+    if (this.scoreDrawView && this.drawStyle === 'bars') p.set('ds', 'bars')
     return `#${p.toString()}`
   }
 
@@ -346,5 +355,6 @@ export class Explorer {
     this.displayAs = p.get('pct') === '1' && this.percentAllowed ? 'percent' : 'absolute'
     const n = Number(p.get('n'))
     this.topN = Number.isInteger(n) && n >= 2 && n <= 15 ? n : 10
+    this.drawStyle = p.get('ds') === 'bars' ? 'bars' : 'dots'
   }
 }

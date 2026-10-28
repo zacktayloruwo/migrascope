@@ -15,9 +15,11 @@
 
   // `line`: a level series (e.g. the Express Entry CRS cutoff) - one set of
   // dots per category, not stacked bars, and no total in the tooltip.
+  // `drawMode`: how a draw-by-draw view (data.draws) is drawn - see buildOption().
   let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel,
-        line = false }: {
+        line = false, drawMode = 'dots' }: {
     data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean; line?: boolean
+    drawMode?: 'dots' | 'bars'
     /** Period labels with incomplete data (e.g. "2026"): marked with an asterisk above the bar. */
     partial?: string[]
     /** Display names of categories switched off in the legend (bindable, so the CSV export can skip them). */
@@ -120,6 +122,16 @@
     const seriesData = (c: string) => draws
       ? periodOrder.map((period, i) => ({ value: [time(period), values.get(c)![i]], period }))
       : values.get(c)
+    // Draw views (Express Entry rounds) come two ways:
+    //  - dots: one see-through dot per draw, smaller the more draws are in
+    //    view (10px for a few dozen, 4px for all of 2015-2026),
+    //  - bars: stacked bars, one per draw (the pool's score ranges can switch
+    //    between dots and bars).
+    // A level series outside a draw view is dots.
+    const mode = draws ? drawMode : line ? 'dots' : 'bars'
+    const dots = mode === 'dots'
+    const dotSize = (draws ? Math.max(4, Math.min(10, Math.round(2400 / Math.max(1, periodOrder.length)))) : 10) *
+      (forImage ? 1.6 : 1)
     const drawBarWidth = Math.max(1, Math.min(forImage ? 24 : 12, Math.floor((forImage ? 1600 : 800) / (periodOrder.length * 1.6))))
     const longDate = (iso: string) => new Intl.DateTimeFormat(lang === 'fr' ? 'fr-CA' : 'en-CA',
       { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(iso))
@@ -133,7 +145,7 @@
         ? { left: 0, right: 8, top: 36, bottom: legend.single ? 0 : 64, containLabel: true }
         : { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
       tooltip: forImage ? undefined : {
-        trigger: 'axis', axisPointer: { type: line ? 'line' : 'shadow' }, confine: true,
+        trigger: 'axis', axisPointer: { type: draws || dots ? 'line' : 'shadow' }, confine: true,
         formatter: (items: { seriesName: string; value: number | null; color: string; axisValueLabel: string }[]) => {
           const shown = items.filter((p) => p.seriesName !== PARTIAL_MARKER && p.value != null && p.value !== 0).reverse()
           const total = shown.reduce((a, p) => a + (p.value ?? 0), 0)
@@ -210,18 +222,17 @@
       },
       series: [...stackOrder.map((c) => ({
         name: name(c),
-        ...(line
+        ...(dots
           // dots only (a line series with no line keeps the axis tooltip),
-          // large and see-through so overlapping draws stay readable
-          ? { type: 'line', symbol: 'circle', symbolSize: forImage ? 16 : 10, showAllSymbol: true,
-              lineStyle: { opacity: 0 } }
+          // see-through so overlapping draws stay readable
+          ? { type: 'line', symbol: 'circle', symbolSize: dotSize, showAllSymbol: true, lineStyle: { opacity: 0 } }
           : draws ? { type: 'bar', stack: 'total', barWidth: drawBarWidth }
           : { type: 'bar', stack: 'total', barMaxWidth: forImage ? 96 : 48 }),
-        emphasis: { focus: 'series', ...(line ? { itemStyle: { opacity: 1 } } : {}) },
+        emphasis: { focus: 'series', ...(dots ? { itemStyle: { opacity: 1 } } : {}) },
         data: seriesData(c),
         itemStyle: {
           color: single ? '#2348C4' : colour(c),
-          opacity: line ? 0.55 : undefined,
+          opacity: dots ? 0.55 : undefined,
           // Suppressed Residual is drawn hatched, not just grey, so it reads as "missing" rather than a category.
           decal: c === SUPPRESSED_RESIDUAL
             ? { symbol: 'rect', symbolSize: 1, color: '#8E96A3', dashArrayX: [1, 0], dashArrayY: [2, 4], rotation: -Math.PI / 4 }

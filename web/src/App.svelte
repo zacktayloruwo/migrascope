@@ -279,6 +279,14 @@
         <div class="chart-head">
           <h1 id="chart-title">{title}</h1>
           <div class="chart-actions">
+          {#if app.scoreDrawView && app.plotData?.rows.length}
+            <div class="segmented" role="group" aria-label={app.lang === 'fr' ? 'Présentation' : 'Chart style'}>
+              <button type="button" aria-pressed={app.drawStyle === 'dots'} onclick={() => (app!.drawStyle = 'dots')}>
+                {app.lang === 'fr' ? 'Points' : 'Dots'}</button>
+              <button type="button" aria-pressed={app.drawStyle === 'bars'} onclick={() => (app!.drawStyle = 'bars')}>
+                {app.lang === 'fr' ? 'Barres empilées' : 'Stacked bars'}</button>
+            </div>
+          {/if}
           {#if app.plotData?.rows.length}
             <button type="button" class="icon-button" onclick={exportCsv}
                     aria-label={app.lang === 'fr' ? 'Télécharger les données affichées (CSV)' : 'Download the data shown (CSV)'}
@@ -321,7 +329,8 @@
         {:else}
           <Chart data={app.plotData} lang={app.lang} {i18n} granularity={app.params?.granularity ?? 'Annual'}
                  percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)}
-                 bind:hidden={hiddenCategories} {nullLabel} line={app.params?.level ?? false} bind:this={chartRef} />
+                 bind:hidden={hiddenCategories} {nullLabel} line={app.params?.level ?? false} drawMode={app.drawMode}
+                 bind:this={chartRef} />
         {/if}
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}
@@ -345,7 +354,14 @@
     flex: none; width: 32px; height: 32px; border: 1px solid var(--border-strong); border-radius: 7px;
     background: var(--surface); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
   }
-  .chart-actions { display: flex; gap: 6px; flex: none; }
+  .chart-actions { display: flex; gap: 6px; flex: none; align-items: center; }
+  /* the dots/bars toggle (as the Controls' segmented buttons) */
+  .segmented { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; margin-right: 4px; }
+  .segmented button {
+    border: 0; background: var(--surface); color: var(--ink-2); padding: 0 10px; height: 30px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .segmented button + button { border-left: 1px solid var(--border-strong); }
+  .segmented button[aria-pressed='true'] { background: var(--primary); color: #fff; }
   .icon-button:hover { background: var(--primary-tint); color: var(--primary); }
   .chart-card.fullscreen { border-radius: 0; overflow: auto; }
   .message { margin: 0; padding: 48px 0; text-align: center; color: var(--ink-3); }
