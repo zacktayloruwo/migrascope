@@ -10,9 +10,15 @@
 #    IRCC took the distribution before each draw, from January 2022 (a
 #    stock: each month keeps its last distribution),
 #  - "CRS score of lowest-ranked candidate invited": each round type's
-#    lowest score invited in the month - a level, not a count, which the
-#    web app draws as lines and rolls up to quarters and years by taking the
-#    lowest value (series_summary.measure = "level", data-raw/10).
+#    lowest score invited in the month - a level, not a count
+#    (series_summary.measure = "level", data-raw/10).
+#
+# The web app plots these three draw by draw, not by period: the draws go in
+# two more tables, ee_draws (draw number, date, round name in both
+# languages, the pool's "as on" date) and ee_draw_facts (each series'
+# values per draw, with the same series/facet/breakdown labels), which
+# 10_export_web.R writes to draws.json. The monthly series_facts rows stay
+# for the landing card, the drill-down choices and the R app.
 # Round names carry version suffixes ("(Version 1)", "2026-Version 2") and
 # were renamed over time; ROUND_TYPES below groups them into stable types,
 # which in turn sit in three groups (all programs, program-specific,
@@ -47,14 +53,14 @@ if (!file.exists(DB_PATH)) stop("app/data/immigration.duckdb not found - run dat
 dir.create(DOWNLOAD_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # ---- download (every run: IRCC adds a record after each draw) ---------------------
-ua <- "canadian-immigration-statistics ingest pipeline"
 rounds <- lapply(c("en", "fr"), function(lang) {
   path <- file.path(DOWNLOAD_DIR, sprintf("ee_rounds_123_%s.json", lang))
-  # Through the system curl: canada.ca resets or stalls R's own HTTP
-  # client (httr2/libcurl) on this file - "HTTP/2 stream was not closed
-  # cleanly", then no response at all - while command-line curl gets it.
+  # Through the system curl, with curl's own user agent: canada.ca resets the
+  # connection for this file when the request names itself the way the rest
+  # of the pipeline does ("HTTP/2 stream was not closed cleanly"), and R's
+  # client (httr2/libcurl) stalls on it either way.
   status <- system2("curl", c("--silent", "--show-error", "--fail", "--location", "--retry", "3",
-                              "--max-time", "120", "--user-agent", shQuote(ua), "--output", shQuote(path),
+                              "--max-time", "120", "--output", shQuote(path),
                               shQuote(URL[[lang]])))
   if (status != 0) stop("Could not download ", URL[[lang]])
   jsonlite::fromJSON(path)$rounds |> as_tibble()
@@ -186,6 +192,29 @@ cols <- dbListFields(con, "series_facts")
 stopifnot(setequal(cols, names(rows)))
 invisible(dbExecute(con, "DELETE FROM series_facts WHERE source_table_id = ?", params = list(TABLE_ID)))
 dbAppendTable(con, "series_facts", rows[, cols])
+
+# ---- draw by draw (the web app's view) ---------------------------------------------
+fr_round <- rounds$fr |> transmute(draw = drawNumber, round_fr = drawName)
+ee_draws <- draws |>
+  transmute(draw, date, round = name) |>
+  left_join(fr_round, by = "draw") |>
+  left_join(dd |> transmute(draw, pool_as_on = as_on), by = "draw") |>
+  arrange(date, draw)
+draw_rows <- function(d, series, facet, b1 = NA_character_, b2 = NA_character_) {
+  tibble::tibble(series = series, facet = facet, breakdown_1 = b1, breakdown_2 = b2, draw = d$draw, value = d$value)
+}
+pool_draws <- dd |>
+  tidyr::pivot_longer(all_of(BANDS$col), names_to = "col", values_to = "value") |>
+  inner_join(BANDS, by = "col")
+ee_draw_facts <- bind_rows(
+  draw_rows(inv, SERIES[["invitations"]], "Round Type", inv$group, inv$type),
+  draw_rows(inv, SERIES[["invitations"]], "Total"),
+  draw_rows(draws |> mutate(value = crs), SERIES[["cutoff"]], "Round Type", draws$group, draws$type),
+  draw_rows(pool_draws, SERIES[["pool"]], "CRS Score Range", pool_draws$b1, pool_draws$b2),
+  draw_rows(dd |> mutate(value = dd18), SERIES[["pool"]], "Total")
+)
+dbWriteTable(con, "ee_draws", ee_draws, overwrite = TRUE)
+dbWriteTable(con, "ee_draw_facts", ee_draw_facts, overwrite = TRUE)
 
 # ---- French labels ------------------------------------------------------------------
 # Round types from the table above (checked against the French file's own

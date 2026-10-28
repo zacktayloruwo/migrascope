@@ -21,7 +21,8 @@ export interface PartialPeriod {
  *   quarterly with a year-to-date current year.
  */
 export function partialPeriods(cols: SeriesFactsColumns, p: ViewParams, dataThrough: string): PartialPeriod[] {
-  if (p.granularity === 'Monthly') return []
+  // a month or a single draw is never partial
+  if (p.granularity === 'Monthly' || p.granularity === 'Draw') return []
   const [throughYear, throughMonth] = dataThrough.split('-').map(Number)
 
   // months seen per year (and per quarter), across every row the chart uses
@@ -48,19 +49,6 @@ export function partialPeriods(cols: SeriesFactsColumns, p: ViewParams, dataThro
   // estimates are quarterly).
   const incomplete = (months: Set<number>, last: number, all: number) =>
     p.isStock ? !months.has(last) : months.size < all
-
-  // Irregular events: the latest period is partial if it ends after the
-  // last event in the data; earlier ones are complete whatever months they cover.
-  if (p.events) {
-    const keys = p.granularity === 'Annual' ? [...byYear.keys()].map(String) : [...byQuarter.keys()]
-    const latest = keys.sort().at(-1)
-    if (latest === undefined) return []
-    const months = p.granularity === 'Annual' ? byYear.get(Number(latest))! : byQuarter.get(latest)!
-    const end = p.granularity === 'Annual' ? 12 : Number(latest.slice(-1)) * 3
-    // the period runs from its start to the latest event, whatever months happened to have one
-    const last = Math.max(...months)
-    return last < end ? [{ period: latest, year: Number(latest.slice(0, 4)), months: [end - (p.granularity === 'Annual' ? 11 : 2), last] }] : []
-  }
 
   if (p.granularity === 'Annual') {
     for (const year of [...years].sort((a, b) => a - b)) {

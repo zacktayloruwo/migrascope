@@ -13,7 +13,8 @@ import type { SeriesFactsColumns } from './columns'
 import { GEO_UNIT_SEP, NA_LABEL, ORDINAL_COHORT_REGEX, OTHER, PROVINCE_ABBR, PROVINCE_ORDER_WEST_TO_EAST,
          SUPPRESSED_RESIDUAL } from './constants'
 
-export type Granularity = 'Annual' | 'Quarterly' | 'Monthly'
+/** 'Draw': one bar or point per Express Entry draw, at its date (series_summary.draws). */
+export type Granularity = 'Annual' | 'Quarterly' | 'Monthly' | 'Draw'
 
 export interface ViewParams {
   series: string
@@ -36,11 +37,6 @@ export interface ViewParams {
    * Suppressed Residual, "Other" or percentage. Not in the R app.
    */
   level?: boolean
-  /**
-   * Irregular events (Express Entry draws, series_summary.events): a month
-   * without one isn't missing data, so only the latest period can be partial.
-   */
-  events?: boolean
 }
 
 export interface PlotRow {
@@ -55,6 +51,27 @@ export interface PlotData {
   categoryOrder: string[]
   periodOrder: string[]
   rows: PlotRow[]
+  /** Draw views only: each period's draw, for a date axis and the tooltip. */
+  draws?: Record<string, DrawInfo>
+}
+
+/** One Express Entry draw, as data-raw/10 writes it to draws.json. */
+export interface DrawInfo {
+  draw: string
+  /** YYYY-MM-DD */
+  date: string
+  round: string
+  round_fr: string | null
+  /** When IRCC counted the pool for this draw (YYYY-MM-DD), if it did. */
+  pool_as_on: string | null
+}
+
+/** draws.json, column-wise; `facts.draw_index` points into `draws`. */
+export interface DrawData {
+  theme: string
+  draws: { draw: string[]; date: string[]; round: string[]; round_fr: (string | null)[]; pool_as_on: (string | null)[] }
+  facts: { series: string[]; facet: string[]; breakdown_1: (string | null)[]; breakdown_2: (string | null)[];
+           draw_index: number[]; value: number[] }
 }
 
 interface RawRow {
@@ -358,6 +375,55 @@ export function buildPlotData(cols: SeriesFactsColumns, p: ViewParams): PlotData
   }))
   if (p.displayAs === 'percent' && !p.level) rows = toPercentOfTotal(rows)
   return { categoryOrder, periodOrder, rows }
+}
+
+// ---- draw by draw (not in the R app) ----------------------------------------------------
+
+/** A draw's period key: its date and number, which also label the CSV rows ("2026-10-27 #452"). */
+export const drawPeriod = (date: string, draw: string) => `${date} #${draw}`
+
+/** The one draw series whose values are IRCC's pool count (its tooltip gives the count's date). */
+const POOL_SERIES = 'Candidates in the pool'
+
+/**
+ * One period per Express Entry draw instead of a month, quarter or year:
+ * the same series/facet/drill selection as buildPlotData(), from draws.json.
+ * Counts can still fold small categories into "Other" and show percentages
+ * (of each draw's total); there's no Suppressed Residual.
+ */
+export function buildDrawPlotData(d: DrawData, p: ViewParams): PlotData {
+  const f = d.facts
+  const [y0, y1] = p.years
+  const cells = new Map<string, AggRow>()
+  const draws: Record<string, DrawInfo> = {}
+  for (let i = 0; i < f.series.length; i++) {
+    if (f.series[i] !== p.series || f.facet[i] !== p.facet) continue
+    if (p.drill1 != null && f.breakdown_1[i] !== p.drill1) continue
+    const category = p.facet === 'Total' ? 'Total' : p.drill1 != null ? f.breakdown_2[i] : f.breakdown_1[i]
+    if (p.drill1 != null && category == null) continue
+    const k = f.draw_index[i]
+    const date = d.draws.date[k]
+    const year = Number(date.slice(0, 4))
+    if (year < y0 || year > y1) continue
+    const period = drawPeriod(date, d.draws.draw[k])
+    draws[period] ??= { draw: d.draws.draw[k], date, round: d.draws.round[k], round_fr: d.draws.round_fr[k],
+                        pool_as_on: p.series === POOL_SERIES ? d.draws.pool_as_on[k] : null }
+    const key = `${category ?? '\u0000NA'}\u0001${period}`
+    const cell = cells.get(key)
+    // a drill level the data doesn't split further can repeat a category within one draw: sum it
+    if (cell) cell.value += f.value[i]
+    else cells.set(key, { category, period, periodSort: Date.parse(date) + k, value: f.value[i] })
+  }
+  const agg = [...cells.values()]
+  if (agg.length === 0) return { categoryOrder: [], periodOrder: [], rows: [], draws }
+  const capped = p.level ? agg : collapseToTopN(agg, p.topN)
+  const periodOrder = [...new Map(capped.map((r) => [r.period, r.periodSort])).entries()]
+    .sort((a, b) => a[1] - b[1]).map(([period]) => period)
+  const categoryOrder = orderCategories(categoryTotalsDesc(capped.filter((r) => r.category !== null))
+    .map((t) => t.category as string))
+  let rows: PlotRow[] = capped.map((r) => ({ category: r.category, period: r.period, periodSort: r.periodSort, value: r.value }))
+  if (p.displayAs === 'percent' && !p.level) rows = toPercentOfTotal(rows)
+  return { categoryOrder, periodOrder, rows, draws }
 }
 
 // ---- web-only ordering (not in the R app) ----------------------------------------------

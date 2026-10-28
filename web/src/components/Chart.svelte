@@ -13,8 +13,8 @@
 
   echarts.use([BarChart, LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer, CanvasRenderer])
 
-  // `line`: a level series (e.g. the Express Entry CRS cutoff) - one line per
-  // category, not stacked bars, and no total in the tooltip.
+  // `line`: a level series (e.g. the Express Entry CRS cutoff) - one set of
+  // dots per category, not stacked bars, and no total in the tooltip.
   let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel,
         line = false }: {
     data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean; line?: boolean
@@ -112,6 +112,17 @@
       const i = periodIndex.get(r.period)
       if (arr && i !== undefined) arr[i] = (arr[i] ?? 0) + r.value
     }
+    // Draw views (Express Entry rounds): a date axis with one bar or point per
+    // draw, so the gaps between draws show. Every series has a point at every
+    // draw (null where it has no value), which keeps the stacks aligned.
+    const draws = data.draws
+    const time = (period: string) => Date.parse(draws![period].date)
+    const seriesData = (c: string) => draws
+      ? periodOrder.map((period, i) => ({ value: [time(period), values.get(c)![i]], period }))
+      : values.get(c)
+    const drawBarWidth = Math.max(1, Math.min(forImage ? 24 : 12, Math.floor((forImage ? 1600 : 800) / (periodOrder.length * 1.6))))
+    const longDate = (iso: string) => new Intl.DateTimeFormat(lang === 'fr' ? 'fr-CA' : 'en-CA',
+      { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(iso))
 
     return {
       animation: !forImage,
@@ -130,6 +141,28 @@
             `<div style="display:flex;justify-content:space-between;gap:16px"><span>` +
             `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:6px"></span>` +
             `${escapeHtml(p.seriesName)}</span><strong>${fmt(p.value ?? 0)}</strong></div>`)
+          if (draws) {
+            // every draw on the hovered date (two were held on one day in 2018), then the values
+            const periods = [...new Set(items.map((p) => (p as unknown as { data: { period: string } }).data?.period).filter(Boolean))]
+            const head = periods.map((key) => {
+              const d = draws[key]
+              const round = lang === 'fr' ? d.round_fr ?? d.round : d.round
+              return `<div style="font-weight:700">${escapeHtml(i18n.t('draw_label', lang, d.draw))} · ${escapeHtml(longDate(d.date))}</div>` +
+                `<div style="margin-bottom:4px">${escapeHtml(round)}` +
+                (d.pool_as_on ? `<br>${escapeHtml(i18n.t('pool_as_on', lang, longDate(d.pool_as_on)))}` : '') + '</div>'
+            }).join('')
+            const values = items.filter((p) => {
+              const v = (p as unknown as { data: { value: [number, number | null] } }).data?.value?.[1]
+              return v != null && v !== 0
+            }).reverse()
+            const total = values.reduce((a, p) => a + ((p as unknown as { data: { value: [number, number] } }).data.value[1]), 0)
+            return head + values.map((p) => {
+              const v = (p as unknown as { data: { value: [number, number] } }).data.value[1]
+              return `<div style="display:flex;justify-content:space-between;gap:16px"><span>` +
+                `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:6px"></span>` +
+                `${escapeHtml(p.seriesName)}</span><strong>${fmt(v)}</strong></div>`
+            }).join('') + (values.length > 1 && !percent && !line ? `<div style="text-align:right">${fmt(total)}</div>` : '')
+          }
           const period = items[0]?.axisValueLabel ?? ''
           const head = `<div style="font-weight:700;margin-bottom:4px">${escapeHtml(period)}` +
             (partialSet.has(period) ? ` <span style="font-weight:400">(${partialLabel})</span>` : '') +
@@ -151,7 +184,11 @@
       // split lines fall on category boundaries (ticks not centred on bars):
       // a line between years in Quarterly/Monthly views, and a thinner one
       // between quarters in the Monthly view.
-      xAxis: [
+      xAxis: draws ? [{
+        type: 'time',
+        axisLabel: { color: '#3A4558', fontSize, hideOverlap: true },
+        splitLine: { show: false }
+      }] : [
         {
           type: 'category', data: periodOrder,
           axisLabel: {
@@ -174,13 +211,17 @@
       series: [...stackOrder.map((c) => ({
         name: name(c),
         ...(line
-          ? { type: 'line', connectNulls: true, symbol: 'circle', symbolSize: forImage ? 10 : 6,
-              lineStyle: { width: forImage ? 3 : 2 } }
+          // dots only (a line series with no line keeps the axis tooltip),
+          // large and see-through so overlapping draws stay readable
+          ? { type: 'line', symbol: 'circle', symbolSize: forImage ? 16 : 10, showAllSymbol: true,
+              lineStyle: { opacity: 0 } }
+          : draws ? { type: 'bar', stack: 'total', barWidth: drawBarWidth }
           : { type: 'bar', stack: 'total', barMaxWidth: forImage ? 96 : 48 }),
-        emphasis: { focus: 'series' },
-        data: values.get(c),
+        emphasis: { focus: 'series', ...(line ? { itemStyle: { opacity: 1 } } : {}) },
+        data: seriesData(c),
         itemStyle: {
           color: single ? '#2348C4' : colour(c),
+          opacity: line ? 0.55 : undefined,
           // Suppressed Residual is drawn hatched, not just grey, so it reads as "missing" rather than a category.
           decal: c === SUPPRESSED_RESIDUAL
             ? { symbol: 'rect', symbolSize: 1, color: '#8E96A3', dashArrayX: [1, 0], dashArrayY: [2, 4], rotation: -Math.PI / 4 }

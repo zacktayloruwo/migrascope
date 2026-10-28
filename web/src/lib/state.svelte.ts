@@ -13,7 +13,7 @@
 
 import type { SeriesFactsColumns } from '../query/columns'
 import { GEO_UNIT_SEP } from '../query/constants'
-import { buildPlotData, isScoreRangeView, orderScoreRanges, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
+import { buildDrawPlotData, buildPlotData, isScoreRangeView, orderScoreRanges, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
          type ViewParams } from '../query/plotData'
 import { partialPeriods, type PartialPeriod } from '../query/partial'
 import { drillableValues } from '../query/drill'
@@ -91,11 +91,13 @@ export class Explorer {
     return this.rankRows.find((r) => r.facet === facet) ?? null
   })
 
-  granularityChoices = $derived<Granularity[]>(
+  // Express Entry rounds are shown draw by draw only (no monthly/quarterly/annual roll-up).
+  granularityChoices = $derived.by((): Granularity[] =>
+    this.scope?.draws && this.meta.drawData ? ['Draw'] :
     !this.scope?.has_month ? ['Annual'] : this.scope.quarterly_only ? ['Quarterly', 'Annual'] : GRANULARITIES)
 
   private plotGranularity = $derived<Granularity>(
-    this.granularityChoices.includes(this.granularity) ? this.granularity : 'Annual')
+    this.granularityChoices.includes(this.granularity) ? this.granularity : this.granularityChoices.at(-1) ?? 'Annual')
 
   /**
    * The years this view can show. Monthly and Quarterly start at the first
@@ -151,7 +153,7 @@ export class Explorer {
       displayAs: this.percentAllowed ? this.displayAs : 'absolute',
       geoUnitPrefix: this.geoLevel !== 'national' && this.geoUnit !== 'All' ? this.geoUnit.split(GEO_UNIT_SEP) : [],
       drill1, drill2,
-      level: s.measure === 'level', events: !!s.events
+      level: s.measure === 'level'
     }
   })
 
@@ -160,7 +162,9 @@ export class Explorer {
     this.params.geoUnitPrefix.length === 0)
 
   plotData = $derived.by((): PlotData | null => {
-    const data = this.colsReady && this.params ? buildPlotData(this.cols!, this.params) : this.pendingDefault()
+    const p = this.params
+    const data = p?.granularity === 'Draw' && this.meta.drawData ? buildDrawPlotData(this.meta.drawData, p)
+      : this.colsReady && p ? buildPlotData(this.cols!, p) : this.pendingDefault()
     if (!data) return data
     if (this.isProvinceView) return orderWestToEast(data)
     return isScoreRangeView(data) ? orderScoreRanges(data) : data

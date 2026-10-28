@@ -116,22 +116,36 @@ monthly <- dbGetQuery(con, "
   SELECT theme, series, facet, geo_level, bool_and(period_month IN (3, 6, 9, 12)) AS quarterly_only,
          min(period_year)::INTEGER AS month_min_year
   FROM series_facts WHERE period_type = 'month' GROUP BY ALL")
-# events: a series of irregular events (Express Entry draws), where a month
-# without one isn't missing data - only its latest period can be partial.
-# measure: "level" for a score rather than a count (drawn as lines, rolled
-# up by its lowest value, never stacked, totalled or shown as a percentage).
+# draws: plotted draw by draw from draws.json (below), not rolled up into
+# months, quarters or years (the Express Entry rounds, data-raw/09d).
+# measure: "level" for a score rather than a count (drawn as lines and
+# points, never stacked, totalled or shown as a percentage).
 LEVEL_SERIES <- c("CRS score of lowest-ranked candidate invited")
-events <- dbGetQuery(con, sprintf("
-  SELECT theme, series, facet, geo_level, bool_or(contains(source_table_id, '%s')) AS events
-  FROM series_facts GROUP BY ALL", EE_ROUNDS))
+draw_series <- if (dbExistsTable(con, "ee_draw_facts")) {
+  dbGetQuery(con, "SELECT DISTINCT 'express_entry' AS theme, series, facet, 'National' AS geo_level, TRUE AS draws FROM ee_draw_facts")
+} else tibble::tibble(theme = character(), series = character(), facet = character(), geo_level = character(), draws = logical())
 series_summary <- series_summary |>
   left_join(monthly, by = c("theme", "series", "facet", "geo_level")) |>
-  left_join(events, by = c("theme", "series", "facet", "geo_level")) |>
+  left_join(draw_series, by = c("theme", "series", "facet", "geo_level")) |>
   mutate(quarterly_only = coalesce(quarterly_only, FALSE),
          month_min_year = ifelse(!is.na(month_min_year) & month_min_year > min_year, month_min_year, NA_integer_),
-         events = ifelse(events, TRUE, NA),
+         draws = ifelse(draws, TRUE, NA),
          measure = ifelse(series %in% LEVEL_SERIES, "level", NA_character_))
 write_json(series_summary, "series_summary.json")
+
+# draws.json: the Express Entry rounds draw by draw, column-wise. `facts`
+# rows point into `draws` by position (draw_index, 0-based).
+if (dbExistsTable(con, "ee_draws")) {
+  ee_draws <- dbGetQuery(con, "SELECT draw, strftime(date, '%Y-%m-%d') AS date, round, round_fr,
+                                      strftime(pool_as_on, '%Y-%m-%d') AS pool_as_on FROM ee_draws ORDER BY date, draw")
+  ee_facts <- dbGetQuery(con, "SELECT series, facet, breakdown_1, breakdown_2, draw, value FROM ee_draw_facts
+                               ORDER BY series, facet, breakdown_1, breakdown_2, draw")
+  ee_facts$draw_index <- match(ee_facts$draw, ee_draws$draw) - 1L
+  stopifnot(!anyNA(ee_facts$draw_index))
+  write_json(list(theme = "express_entry", draws = as.list(ee_draws),
+                  facts = as.list(ee_facts[c("series", "facet", "breakdown_1", "breakdown_2", "draw_index", "value")])),
+             "draws.json")
+}
 
 geo_rows <- series_summary[series_summary$geo_level != "National", , drop = FALSE]
 geo_units <- lapply(seq_len(nrow(geo_rows)), function(i) {
@@ -321,7 +335,8 @@ data_pulled <- if ("checked_at" %in% names(download_log) && any(!is.na(download_
 # ---- manifest ---------------------------------------------------------------
 json_files <- c("series_summary.json", "geo_units.json", "landing.json", "strings.json",
                 "sources.json", "about_en.html", "about_fr.html", sprintf("views/%s.default.json", names(default_views)),
-                if (file.exists(file.path(OUT_DIR, "translations.parquet"))) "translations.parquet")
+                if (file.exists(file.path(OUT_DIR, "translations.parquet"))) "translations.parquet",
+                if (file.exists(file.path(OUT_DIR, "draws.json"))) "draws.json")
 write_json(list(
   built_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
   data_through = sprintf("%d-%02d", data_through %/% 100, data_through %% 100),

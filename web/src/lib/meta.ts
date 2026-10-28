@@ -4,6 +4,7 @@
 import { parquetRead } from 'hyparquet'
 import { compressors } from 'hyparquet-compressors'
 import type { DataStore } from '../query/loader'
+import type { DrawData } from '../query/plotData'
 
 /** One (theme, series, facet, geo_level) combination - R: build_series_summary(). */
 export interface SummaryRow {
@@ -19,8 +20,8 @@ export interface SummaryRow {
   quarterly_only?: boolean
   /** First year with monthly rows, when earlier years are annual only (pre-2015 extracts). */
   month_min_year?: number | null
-  /** Irregular events (Express Entry draws): only the latest period can be partial. */
-  events?: boolean | null
+  /** Plotted draw by draw from draws.json (Express Entry rounds), not by period. */
+  draws?: boolean | null
   /** "level": a score, not a count (drawn as lines, lowest value per period). */
   measure?: 'level' | null
   is_stock: boolean
@@ -95,6 +96,8 @@ export interface Meta {
   aboutHtml: { en: string; fr: string }
   dataThrough: string
   dataPulled: string | null
+  /** The Express Entry rounds draw by draw, when exported. */
+  drawData: DrawData | null
 }
 
 async function loadTranslations(store: DataStore): Promise<Translations> {
@@ -126,7 +129,11 @@ export async function loadMeta(store: DataStore): Promise<Meta> {
     const f = m.files.find((x) => x.path === path)
     return (await fetch(new URL(f ? `${path}?v=${f.hash}` : path, new URL(store.baseUrl, location.href)))).text()
   }
-  const [summary, geoUnits, sources, strings, translations, aboutEn, aboutFr, manifest] = await Promise.all([
+  const drawData = async () => {
+    const m = await store.manifest()
+    return m.files.some((f) => f.path === 'draws.json') ? store.json<DrawData>('draws.json') : null
+  }
+  const [summary, geoUnits, sources, strings, translations, aboutEn, aboutFr, manifest, draws] = await Promise.all([
     store.json<SummaryRow[]>('series_summary.json'),
     store.json<GeoUnitsEntry[]>('geo_units.json'),
     store.json<SourceRecord[]>('sources.json'),
@@ -134,8 +141,9 @@ export async function loadMeta(store: DataStore): Promise<Meta> {
     loadTranslations(store),
     text('about_en.html'),
     text('about_fr.html'),
-    store.manifest()
+    store.manifest(),
+    drawData()
   ])
   return { summary, geoUnits, sources, strings, translations, aboutHtml: { en: aboutEn, fr: aboutFr },
-           dataThrough: manifest.data_through, dataPulled: manifest.data_pulled ?? null }
+           dataThrough: manifest.data_through, dataPulled: manifest.data_pulled ?? null, drawData: draws }
 }

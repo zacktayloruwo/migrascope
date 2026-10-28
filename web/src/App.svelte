@@ -112,7 +112,7 @@
     const csv = buildCsv(data, {
       columns,
       header: categoryName,
-      periodLabel: l === 'fr' ? 'Période' : 'Period',
+      periodLabel: data.draws ? (l === 'fr' ? 'Date et ronde' : 'Date and draw') : l === 'fr' ? 'Période' : 'Period',
       percent,
       notes
     })
@@ -127,7 +127,7 @@
     if (!app || !i18n || !app.params || !chartRef || exportingPng) return
     const l = app.lang
     const p = app.params
-    const gran = i18n.t(({ Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual' } as Record<string, string>)[p.granularity], l)
+    const gran = i18n.t(({ Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual', Draw: 'by_draw' } as Record<string, string>)[p.granularity], l)
     const years = p.years[0] === p.years[1] ? `${p.years[0]}` : `${p.years[0]}–${p.years[1]}`
     const subtitle = [`${gran}, ${years}`, ...(p.displayAs === 'percent' ? [i18n.t('percentage_total', l)] : [])].join(' · ')
     const agency = [...new Set(sourceTables.map((s) => s!.agency))].join(' / ')
@@ -243,7 +243,8 @@
     if (app.params.drill2) parts.push(i18n.category(app.params.drill2, l))
     let t = parts.join(' → ')
     if (app.params.geoUnitPrefix.length) t += ` — ${app.params.geoUnitPrefix[app.params.geoUnitPrefix.length - 1]}`
-    if (app.scope.is_stock) t += ` ${i18n.t('stock_suffix', l)}`
+    // a draw-by-draw view shows each count as it was, with nothing to sum
+    if (app.scope.is_stock && app.params?.granularity !== 'Draw') t += ` ${i18n.t('stock_suffix', l)}`
     return t
   })
 </script>

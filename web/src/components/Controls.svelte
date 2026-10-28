@@ -13,7 +13,9 @@
   const geoLabelKey: Record<GeoLevel, string> = {
     national: 'national', PT: 'province_territory', CMA: 'cma', CD: 'cd', CSD: 'csd'
   }
-  const granKey: Record<Granularity, string> = { Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual' }
+  const granKey: Record<Granularity, string> = { Monthly: 'monthly', Quarterly: 'quarterly', Annual: 'annual', Draw: 'by_draw' }
+  // "By draw" only appears for series plotted draw by draw (Express Entry rounds).
+  const granButtons = $derived<Granularity[]>(app.granularityChoices.includes('Draw') ? [...GRANULARITIES, 'Draw'] : GRANULARITIES)
   const yearOptions = $derived(app.scope
     ? Array.from({ length: app.yearBounds[1] - app.yearBounds[0] + 1 }, (_, i) => app.yearBounds[0] + i)
     : [])
@@ -96,7 +98,7 @@
       <span class="label" id="lbl-gran">{i18n.t('granularity_label', l)}</span>
       <div class="segmented">
         <!-- All three shown; those finer than the series is published at are greyed out, like geography. -->
-        {#each GRANULARITIES as g (g)}
+        {#each granButtons as g (g)}
           <button type="button" aria-pressed={app.granularity === g} disabled={!app.granularityChoices.includes(g)}
                   title={!app.granularityChoices.includes(g) ? i18n.t('geo_not_available', l) : undefined}
                   onclick={() => (app.granularity = g)}>
