@@ -19,6 +19,10 @@ export interface SummaryRow {
   quarterly_only?: boolean
   /** First year with monthly rows, when earlier years are annual only (pre-2015 extracts). */
   month_min_year?: number | null
+  /** Irregular events (Express Entry draws): only the latest period can be partial. */
+  events?: boolean | null
+  /** "level": a score, not a count (drawn as lines, lowest value per period). */
+  measure?: 'level' | null
   is_stock: boolean
   min_year: number
   max_year: number
@@ -42,21 +46,22 @@ export interface SourceRecord {
   url: string
   dataset_url: string
   updated_at: string
-  /** Citation wording: IRCC/IRB files on the Open Government Portal, or a Statistics Canada table. */
-  portal?: 'open_canada' | 'statcan'
+  /** Citation wording: IRCC/IRB files on the Open Government Portal, a Statistics Canada table, or a canada.ca page's data file. */
+  portal?: 'open_canada' | 'statcan' | 'canada_ca'
   /** One of IRCC's frozen pre-2015 ad hoc extracts (data-raw/09c): the caption says where it's joined. */
   historical?: boolean
   /** French names, where the source publishes them (Statistics Canada). */
   agency_fr?: string
   table_name_fr?: string
   dataset_url_fr?: string
+  url_fr?: string
 }
 
 /** A source record with its French names swapped in, where it has them. */
 export function localizeSource(s: SourceRecord, lang: 'en' | 'fr'): SourceRecord {
   if (lang === 'en') return s
   return { ...s, agency: s.agency_fr ?? s.agency, table_name: s.table_name_fr ?? s.table_name,
-           dataset_url: s.dataset_url_fr ?? s.dataset_url }
+           dataset_url: s.dataset_url_fr ?? s.dataset_url, url: s.url_fr ?? s.url }
 }
 
 export interface StringsFile {

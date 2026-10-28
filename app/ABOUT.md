@@ -11,6 +11,12 @@ The app was created by Dr. Zack Taylor, Dept. of Political Science, at the Unive
 - **Asylum Claimants** — persons who made a refugee claim inside Canada.
 - **Refugees** — Refugee Protection Division (RPD) decisions (accepted / rejected / other outcome), combining two source tables into one continuous 1997–2026 series.
 - **Non-Permanent Resident Population** — Statistics Canada's quarterly estimates of everyone living in Canada on a work or study permit, their family members, and asylum claimants, protected persons and related groups, from July 2021. Unlike the IRCC themes, which count permits and claims, this counts people, each in one type only. Each estimate is a stock, dated by Statistics Canada to the first day of a quarter; it is shown at the end of the quarter before (July 1 as June, January 1 as December of the previous year), so a year's bar is its population on December 31.
+- **Express Entry** — IRCC's system for selecting skilled workers for permanent residence (Quebec selects its own and doesn't use it). It follows candidates from invitation to admission:
+  - *Invitations issued* — invitations to apply in each round, by round type: rounds open to all programs, rounds for one program (e.g. the Provincial Nominee Program), and category-based rounds (e.g. French-language proficiency, healthcare). IRCC renames rounds between versions; versions of the same category are shown as one type (e.g. "Healthcare occupations (Version 1)" and "Healthcare and social services occupations (Version 2)").
+  - *CRS score of lowest-ranked candidate invited* — the Comprehensive Ranking System score of the last candidate invited, drawn as lines by round type. When a month, quarter or year has several rounds of a type, it shows the lowest score invited in that period.
+  - *Candidates in the pool* — candidates in the Express Entry pool by CRS score range, from January 2022, as IRCC counted them shortly before each round (a stock: each period shows its latest count).
+  - *Invited candidates who applied* — candidates who were invited and went on to apply, by year, broken down by province/territory, invitation category, CRS score, age, citizenship, education, field of study and language; separate series give occupations for each program.
+  - *Admissions* — permanent residents admitted through Express Entry, by month.
 
 #### Choosing what to show
 
@@ -60,7 +66,7 @@ Left out on purpose:
 
 #### Source
 
-The IRCC and IRB data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/) (including IRCC's pre-2015 extracts, above), and the non-permanent resident estimates from [Statistics Canada table 17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101). It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
+The IRCC and IRB data comes from the [Government of Canada Open Data Portal](https://open.canada.ca/) (including IRCC's pre-2015 extracts, above), the non-permanent resident estimates from [Statistics Canada table 17-10-0121-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710012101), and the Express Entry rounds of invitations from the data file behind IRCC's [Rounds of invitations](https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/express-entry/rounds-invitations.html) page, updated after every round. It is downloaded periodically, processed, and published with this site as compact data files that your browser reads and charts itself. It is not a live query against IRCC/IRB systems; the date of the latest download is shown at the bottom of this page.
 
 A total of {{N_TABLES}} distinct tables are included.
 

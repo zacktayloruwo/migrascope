@@ -49,6 +49,19 @@ export function partialPeriods(cols: SeriesFactsColumns, p: ViewParams, dataThro
   const incomplete = (months: Set<number>, last: number, all: number) =>
     p.isStock ? !months.has(last) : months.size < all
 
+  // Irregular events: the latest period is partial if it ends after the
+  // last event in the data; earlier ones are complete whatever months they cover.
+  if (p.events) {
+    const keys = p.granularity === 'Annual' ? [...byYear.keys()].map(String) : [...byQuarter.keys()]
+    const latest = keys.sort().at(-1)
+    if (latest === undefined) return []
+    const months = p.granularity === 'Annual' ? byYear.get(Number(latest))! : byQuarter.get(latest)!
+    const end = p.granularity === 'Annual' ? 12 : Number(latest.slice(-1)) * 3
+    // the period runs from its start to the latest event, whatever months happened to have one
+    const last = Math.max(...months)
+    return last < end ? [{ period: latest, year: Number(latest.slice(0, 4)), months: [end - (p.granularity === 'Annual' ? 11 : 2), last] }] : []
+  }
+
   if (p.granularity === 'Annual') {
     for (const year of [...years].sort((a, b) => a - b)) {
       const months = byYear.get(year)

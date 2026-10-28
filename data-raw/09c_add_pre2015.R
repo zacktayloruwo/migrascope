@@ -132,7 +132,9 @@ read_csv_cells <- function(file) {
 }
 
 # ---- label maps: pre-2015 text -> the post-2015 label ------------------------
-NOT_STATED <- c(`Age Group` = "Age not stated", Gender = "Gender not stated",
+# Gender has none: IRCC's monthly tables dropped "Gender not stated" in
+# 2026, so those 35 admissions (2000-2014) are in the Total only.
+NOT_STATED <- c(`Age Group` = "Age not stated", Gender = NA_character_,
                 Total = "Province/Territory not stated")
 PR_CITIZENSHIP <- c("United Kingdom and Colonies" = "United Kingdom and Overseas Territories",
                     "Hong Kong" = "Hong Kong SAR",
@@ -204,7 +206,8 @@ pr_sr <- function(file, facet) {
       bind_rows(row_template(d, PR, facet, "PT", geo_1 = pt),
                 row_template(d, PR, facet, "National"))  # summed per year below
     },
-    row_template(d, PR, facet, "National", ifelse(d$label_1 == "Not stated", NOT_STATED[[facet]], d$label_1))
+    row_template(d, PR, facet, "National", ifelse(d$label_1 == "Not stated", NOT_STATED[[facet]], d$label_1)) |>
+      filter(!is.na(b1))
   ) |> mutate(file = file)
 }
 

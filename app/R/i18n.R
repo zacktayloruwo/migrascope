@@ -65,6 +65,34 @@ SERIES_FACET_LABELS_FR <- c(
   # Statistics Canada non-permanent residents (data-raw/09b_add_statcan_npr.R)
   "All non-permanent residents" = "Tous les résidents non permanents",
   "Non-Permanent Resident Type" = "Type de résident non permanent",
+  # Express Entry rounds of invitations (data-raw/09d), in IRCC's own French wording.
+  "Invitations issued" = "Invitations envoyées",
+  "Candidates in the pool" = "Candidats dans le bassin",
+  "CRS score of lowest-ranked candidate invited" = "Note obtenue dans le SCG par le candidat invité le moins bien classé",
+  "Round Type" = "Type de ronde",
+  # Express Entry's IRCC tables (series names set in app/data/label_overrides.xlsx).
+  "Invited candidates who applied" = "Candidats invités ayant présenté une demande",
+  "Invited candidates who applied (Canadian Experience Class)" =
+    "Candidats invités ayant présenté une demande (Catégorie de l’expérience canadienne)",
+  "Invited candidates who applied (Federal Skilled Worker Program)" =
+    "Candidats invités ayant présenté une demande (Programme des travailleurs qualifiés (fédéral))",
+  "Invited candidates who applied (Federal Skilled Trades Program)" =
+    "Candidats invités ayant présenté une demande (Programme des travailleurs de métiers spécialisés (fédéral))",
+  "Invited candidates who applied (Provincial Nominee Program)" =
+    "Candidats invités ayant présenté une demande (Programme des candidats des provinces)",
+  "Admissions" = "Admissions",
+  "Invitation Category" = "Catégorie d'invitation",
+  "Invitation Category and Age Group" = "Catégorie d'invitation et groupe d'âge",
+  "Invitation Category and Country of Citizenship" = "Catégorie d'invitation et pays de citoyenneté",
+  "Invitation Category and CRS Score at Invitation" = "Catégorie d'invitation et note du SCG à l'invitation",
+  "Invitation Category and Field of Study" = "Catégorie d'invitation et domaine d'études",
+  "Invitation Category and First Official Language Tested" = "Catégorie d'invitation et première langue officielle évaluée",
+  "Invitation Category and Level of Canadian Education" = "Catégorie d'invitation et niveau d'études canadiennes",
+  "Invitation Category and Level of Foreign Education" = "Catégorie d'invitation et niveau d'études étrangères",
+  "Occupation" = "Profession",
+  "Intended Occupation" = "Profession envisagée",
+  "Country of Birth" = "Pays de naissance",
+  "CRS Score Range" = "Note du SCG",
   "Public/Private" = "Public/privé",
   "Gender" = "Genre",
   "Immigration Category" = "Catégorie d'immigration",
@@ -158,6 +186,7 @@ STRINGS <- list(
                             fr = ", Portail du gouvernement ouvert, Gouvernement du Canada — "),
   citation_portal_statcan = c(en = " — ",               fr = " — "),
   citation_table_page   = c(en = "table page",         fr = "page du tableau"),
+  citation_web_page     = c(en = "web page",           fr = "page Web"),
   citation_last_accessed = c(en = "Last accessed %s.", fr = "Dernier accès le %s."),
 
   other_category     = c(en = "Other",                 fr = "Autre"),

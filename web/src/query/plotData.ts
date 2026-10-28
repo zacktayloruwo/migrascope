@@ -30,6 +30,17 @@ export interface ViewParams {
   geoUnitPrefix: string[]
   drill1: string | null
   drill2: string | null
+  /**
+   * A score rather than a count (series_summary.measure = "level", e.g. the
+   * Express Entry CRS cutoff): periods take the lowest value, and there's no
+   * Suppressed Residual, "Other" or percentage. Not in the R app.
+   */
+  level?: boolean
+  /**
+   * Irregular events (Express Entry draws, series_summary.events): a month
+   * without one isn't missing data, so only the latest period can be partial.
+   */
+  events?: boolean
 }
 
 export interface PlotRow {
@@ -80,19 +91,27 @@ function addNa(acc: number, x: number | null): number {
   return x == null || Number.isNaN(x) ? acc : acc + x
 }
 
+/** min(x, na.rm = TRUE), starting from Infinity (a group with no values stays Infinity). */
+function minNa(acc: number, x: number | null): number {
+  return x == null || Number.isNaN(x) ? acc : Math.min(acc, x)
+}
+
 /**
- * Group rows by a key, preserving each group's first-seen order, then sum.
+ * Group rows by a key, preserving each group's first-seen order, then sum -
+ * or, with `lowest`, take the smallest value (level series).
  * Callers sort the result where R's output order matters.
  */
-function groupSum<T>(rows: T[], key: (r: T) => string, init: (r: T) => AggRow, value: (r: T) => number | null) {
+function groupSum<T>(rows: T[], key: (r: T) => string, init: (r: T) => AggRow, value: (r: T) => number | null,
+                     lowest = false) {
   const groups = new Map<string, AggRow>()
   for (const r of rows) {
     const k = key(r)
     let g = groups.get(k)
-    if (!g) { g = { ...init(r), value: 0 }; groups.set(k, g) }
-    g.value = addNa(g.value, value(r))
+    if (!g) { g = { ...init(r), value: lowest ? Infinity : 0 }; groups.set(k, g) }
+    g.value = lowest ? minNa(g.value, value(r)) : addNa(g.value, value(r))
   }
-  return [...groups.values()]
+  const out = [...groups.values()]
+  return lowest ? out.filter((g) => Number.isFinite(g.value)) : out
 }
 
 /** Per-category totals in dplyr's order: group keys C-sorted, then a stable desc(total). */
@@ -189,7 +208,7 @@ function latestPerEntity(rows: RawRow[], periodKey: (r: RawRow) => string): RawR
   return [...best.values()]
 }
 
-export function aggregateSeries(raw: RawRow[], granularity: Granularity, isStock: boolean): AggRow[] {
+export function aggregateSeries(raw: RawRow[], granularity: Granularity, isStock: boolean, level = false): AggRow[] {
   if (raw.length === 0) return []
   const catKey = (r: RawRow) => (r.category === null ? '\u0000NA' : r.category)
   const year = (r: RawRow) => String(r.year)
@@ -200,7 +219,7 @@ export function aggregateSeries(raw: RawRow[], granularity: Granularity, isStock
       period: r.month == null ? year(r) : `${r.year}-${String(r.month).padStart(2, '0')}`,
       periodSort: r.year * 100 + (r.month ?? 0),
       value: 0
-    }), (r) => r.value)
+    }), (r) => r.value, level)
   }
 
   if (granularity === 'Quarterly' && raw.some((r) => r.quarter != null)) {
@@ -210,14 +229,14 @@ export function aggregateSeries(raw: RawRow[], granularity: Granularity, isStock
       period: r.quarter == null ? year(r) : `${r.year} Q${r.quarter}`,
       periodSort: r.year * 10 + (r.quarter ?? 0),
       value: 0
-    }), (r) => r.value)
+    }), (r) => r.value, level)
   }
 
   // Annual - also the fallback for Quarterly when no row has a quarter.
   const rows = isStock ? latestPerEntity(raw, (r) => `${r.year}`) : raw
   return groupSum(rows, (r) => `${catKey(r)}\u0001${r.year}`, (r) => ({
     category: r.category, period: year(r), periodSort: r.year, value: 0
-  }), (r) => r.value)
+  }), (r) => r.value, level)
 }
 
 // ---- collapse_to_top_n() --------------------------------------------------------
@@ -281,13 +300,13 @@ export function toPercentOfTotal(rows: PlotRow[]): PlotRow[] {
  * for (theme, p.geoLevel).
  */
 export function buildPlotData(cols: SeriesFactsColumns, p: ViewParams): PlotData {
-  const agg = aggregateSeries(fetchSeriesRows(cols, p), p.granularity, p.isStock)
+  const agg = aggregateSeries(fetchSeriesRows(cols, p), p.granularity, p.isStock, p.level)
 
   // Suppressed Residual: published series total minus what's visible, only at
   // the top breakdown level - once drilled, the series-wide total would count
   // every other category as "suppressed".
   let residual: AggRow[] = []
-  if (agg.length > 0 && p.drill1 == null) {
+  if (agg.length > 0 && p.drill1 == null && !p.level) {
     const totalRows = fetchSeriesRows(cols, p, 'Total')
     if (totalRows.length > 0) {
       // R: fetch_series_published_total() - one summed row per period, then
@@ -319,7 +338,7 @@ export function buildPlotData(cols: SeriesFactsColumns, p: ViewParams): PlotData
     }
   }
 
-  const capped = [...collapseToTopN(agg, p.topN), ...residual]
+  const capped = [...(p.level ? agg : collapseToTopN(agg, p.topN)), ...residual]
   if (capped.length === 0) return { categoryOrder: [], periodOrder: [], rows: [] }
 
   const periodSeen = new Map<string, number>()
@@ -337,7 +356,7 @@ export function buildPlotData(cols: SeriesFactsColumns, p: ViewParams): PlotData
     category: r.category !== null && known.has(r.category) ? r.category : null,
     period: r.period, periodSort: r.periodSort, value: r.value
   }))
-  if (p.displayAs === 'percent') rows = toPercentOfTotal(rows)
+  if (p.displayAs === 'percent' && !p.level) rows = toPercentOfTotal(rows)
   return { categoryOrder, periodOrder, rows }
 }
 

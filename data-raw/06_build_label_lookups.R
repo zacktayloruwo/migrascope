@@ -65,7 +65,8 @@ DATASET_LABELS <- c(
   study_permit_holders   = "Study Permit Holders",
   tr_to_pr_transition    = "TR → PR Transition",
   asylum_claimants       = "Asylum Claimants",
-  refugees               = "Refugees"
+  refugees               = "Refugees",
+  express_entry          = "Express Entry"
 )
 
 con <- dbConnect(duckdb(), DB_PATH, read_only = TRUE)

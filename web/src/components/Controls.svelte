@@ -134,7 +134,9 @@
 
     <label class="group inline">
       <span class="label">{topNLabel[0]}{#if topNLabel[1]}<br />{topNLabel[1]}{/if}</span>
-      <select value={app.topN} onchange={(e) => (app.topN = Number(e.currentTarget.value))}>
+      <select value={app.topN} onchange={(e) => (app.topN = Number(e.currentTarget.value))}
+              disabled={app.scope?.measure === 'level'}
+              title={app.scope?.measure === 'level' ? i18n.t('geo_not_available', l) : undefined}>
         {#each TOP_N_CHOICES as n (n)}<option value={n}>{n}</option>{/each}
       </select>
     </label>

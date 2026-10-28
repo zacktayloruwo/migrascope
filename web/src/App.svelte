@@ -77,8 +77,8 @@
     return ids.map((id) => app!.meta.sources.find((s) => id.includes(`/${s.hash}__`)))
       .filter((s) => s !== undefined).map((s) => localizeSource(s, app!.lang))
   })
-  /** IRCC/IRB's suppression note - Statistics Canada's estimates aren't suppressed. */
-  const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => s.portal !== 'statcan'))
+  /** IRCC/IRB's suppression note - Statistics Canada's estimates and the Express Entry draws aren't suppressed. */
+  const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => (s.portal ?? 'open_canada') === 'open_canada'))
   /** The view joins IRCC's pre-2015 extracts to the monthly tables (data-raw/09c). */
   const spliced = $derived(sourceTables.some((s) => s.historical))
 
@@ -133,7 +133,7 @@
     const agency = [...new Set(sourceTables.map((s) => s!.agency))].join(' / ')
     const sources = sourceTables.length
       ? i18n.t('citation_source', l) + agency +
-        i18n.t(sourceTables[0]!.portal === 'statcan' ? 'citation_portal_statcan' : 'citation_portal', l) +
+        i18n.t((sourceTables[0]!.portal ?? 'open_canada') === 'open_canada' ? 'citation_portal' : 'citation_portal_statcan', l) +
         sourceTables.map((s) => `“${s!.table_name}”${i18n!.t('citation_last_updated', l, s!.updated_at)}`)
           .join(l === 'fr' ? ' ; ' : '; ') + '.'
       : ''
@@ -320,7 +320,7 @@
         {:else}
           <Chart data={app.plotData} lang={app.lang} {i18n} granularity={app.params?.granularity ?? 'Annual'}
                  percent={app.params?.displayAs === 'percent'} partial={app.partial.map((p) => p.period)}
-                 bind:hidden={hiddenCategories} {nullLabel} bind:this={chartRef} />
+                 bind:hidden={hiddenCategories} {nullLabel} line={app.params?.level ?? false} bind:this={chartRef} />
         {/if}
         <p class="note">
           {#if partialNote}<strong class="partial-note"><span class="partial-mark" aria-hidden="true">*</span>{partialNote}</strong>{/if}

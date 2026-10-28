@@ -155,7 +155,7 @@ long <- auto |>
   )
 
 if (file.exists(OUT_PATH)) {
-  previous <- read_excel(OUT_PATH, sheet = 1) |>
+  previous <- read_excel(OUT_PATH, sheet = 1, col_types = "text") |>
     # An all-NA table_id column (every term promoted to global) reads back
     # from Excel as logical rather than character - force it back to match
     # `long`'s type before the join below, or dplyr errors on the mismatch.
@@ -170,6 +170,23 @@ if (file.exists(OUT_PATH)) {
     dplyr::left_join(previous, by = c("en_text", "context", "table_id")) |>
     dplyr::mutate(`FR text (custom)` = dplyr::coalesce(`FR text (custom) prev`, `FR text (custom)`)) |>
     dplyr::select(-"FR text (custom) prev")
+
+  # Keep earlier harvests' pairs this run didn't produce. IRCC's French files
+  # often lag the English ones by a month, and 09_harvest skips any pair
+  # whose two files disagree - so right after a refresh most tables yield
+  # nothing, and rebuilding from this run alone dropped French labels for
+  # ~1,450 terms still in use (October 2026). A term this run does harvest
+  # replaces its old row.
+  carried <- read_excel(OUT_PATH, sheet = 1, col_types = "text") |>
+    dplyr::mutate(table_id = as.character(.data$table_id),
+                   `FR text (auto)` = as.character(.data$`FR text (auto)`),
+                   `FR text (custom)` = dplyr::coalesce(as.character(.data$`FR text (custom)`), "")) |>
+    dplyr::anti_join(long, by = c("en_text", "context")) |>
+    dplyr::select(dplyr::all_of(names(long)))
+  if (nrow(carried) > 0) {
+    cli::cli_alert_info("Carried over {nrow(carried)} pair(s) from earlier harvests that this run didn't produce")
+    long <- dplyr::bind_rows(long, carried) |> dplyr::arrange(.data$context, .data$en_text, .data$table_id)
+  }
 }
 
 wb <- createWorkbook()

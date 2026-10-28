@@ -67,6 +67,8 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
 
 11. **`data-raw/09c_add_pre2015.R`** — extends two series back before 2015 from IRCC's frozen ad hoc extracts: Permanent Residents › All admissions to 2000 ([Specialized Research Datasets](https://open.canada.ca/data/en/dataset/970ff3c4-50fd-4eeb-b402-f82f9ee22990): Total, Immigration Category, Age Group, Gender, Country of Citizenship; Total by CMA from 2006 from [Permanent Residents – Ad Hoc](https://open.canada.ca/data/en/dataset/ad975a26-df23-456a-8ada-756191a23695)) and Study Permit Holders › All permits (Year became effective) to 2004 ([Study Permit Holders – Ad Hoc](https://open.canada.ca/data/en/dataset/b813dcb6-cc08-4e06-97d4-85b7e4daa822): Total, Gender, Country of Citizenship). It writes only the years before 2015, as `period_type = 'year'` rows. Labels are mapped onto the post-2015 ones (an unmapped label stops the script), and each file's 2015 figures must match the monthly tables' (totals within 2%, 3% for study permits; categories/places of 5,000+ admissions or 2,000+ students within 10%) before anything is written. It also adds one French label and writes `app/data/pre2015_sources.csv`, which `10` marks `historical` in `sources.json` so the web app's captions note the join. Re-run after `08`/`09`, like `09b`; `10_export_web.R` stops if the rows are missing. The method is described for users under "Data before 2015" in `app/ABOUT.md`.
 
+12. **`data-raw/09d_add_ee_rounds.R`** — adds IRCC's Express Entry rounds of invitations to the `express_entry` theme from the data file behind canada.ca's [Rounds of invitations](https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/express-entry/rounds-invitations.html) page (`ee_rounds_123_en.json`/`_fr.json`, downloaded on every run): invitations issued and the CRS cutoff by round type, and the pool's CRS score distribution (from 2022, a stock). Raw round names are grouped into stable types by `ROUND_TYPES` (an unknown name stops the script). The cutoff is a level, not a count: `10` marks it `measure = "level"` and the web app draws it as lines, taking each period's lowest score. Writes `app/data/canada_ca_sources.csv` for the citation. The theme's other series come from two IRCC datasets in `ircc_datasets` (`express_entry_ita`, `express_entry_pr`), relabelled to `express_entry` in `05`. Re-run after `08`/`09`.
+
 Run from the project root:
 
 ``` r
@@ -81,6 +83,7 @@ source("data-raw/07_build_series_reference.R")
 source("data-raw/08_build_series_facts.R")
 source("data-raw/09b_add_statcan_npr.R")   # Statistics Canada non-permanent residents theme (re-run after 08/09)
 source("data-raw/09c_add_pre2015.R")       # permanent residents 2000-2014 (re-run after 08/09)
+source("data-raw/09d_add_ee_rounds.R")     # Express Entry rounds of invitations (re-run after 08/09)
 source("data-raw/10_export_web.R")         # Parquet + JSON for the static web app (web/), see docs/wasm-port-plan.md
 source("data-raw/11_export_golden.R")      # golden files for the web app's parity tests (cd web && npm test)
 ```

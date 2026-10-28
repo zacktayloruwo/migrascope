@@ -52,6 +52,12 @@ if (file.exists("app/data/pre2015_sources.csv") &&
     dbGetQuery(con, "SELECT count(*) AS n FROM series_facts WHERE theme = 'permanent_residents' AND period_year < 2015")$n == 0) {
   stop("series_facts has no pre-2015 permanent_residents rows - run data-raw/09c_add_pre2015.R after 08/09")
 }
+# Express Entry rounds of invitations (data-raw/09d), from canada.ca's own data file.
+EE_ROUNDS <- "/ee000123__"
+if (file.exists("app/data/canada_ca_sources.csv") &&
+    dbGetQuery(con, sprintf("SELECT count(*) AS n FROM series_facts WHERE contains(source_table_id, '%s')", EE_ROUNDS))$n == 0) {
+  stop("series_facts has no Express Entry rounds rows - run data-raw/09d_add_ee_rounds.R after 08/09")
+}
 
 unlink(OUT_DIR, recursive = TRUE)
 dir.create(file.path(OUT_DIR, "views"), recursive = TRUE)
@@ -110,10 +116,21 @@ monthly <- dbGetQuery(con, "
   SELECT theme, series, facet, geo_level, bool_and(period_month IN (3, 6, 9, 12)) AS quarterly_only,
          min(period_year)::INTEGER AS month_min_year
   FROM series_facts WHERE period_type = 'month' GROUP BY ALL")
+# events: a series of irregular events (Express Entry draws), where a month
+# without one isn't missing data - only its latest period can be partial.
+# measure: "level" for a score rather than a count (drawn as lines, rolled
+# up by its lowest value, never stacked, totalled or shown as a percentage).
+LEVEL_SERIES <- c("CRS score of lowest-ranked candidate invited")
+events <- dbGetQuery(con, sprintf("
+  SELECT theme, series, facet, geo_level, bool_or(contains(source_table_id, '%s')) AS events
+  FROM series_facts GROUP BY ALL", EE_ROUNDS))
 series_summary <- series_summary |>
   left_join(monthly, by = c("theme", "series", "facet", "geo_level")) |>
+  left_join(events, by = c("theme", "series", "facet", "geo_level")) |>
   mutate(quarterly_only = coalesce(quarterly_only, FALSE),
-         month_min_year = ifelse(!is.na(month_min_year) & month_min_year > min_year, month_min_year, NA_integer_))
+         month_min_year = ifelse(!is.na(month_min_year) & month_min_year > min_year, month_min_year, NA_integer_),
+         events = ifelse(events, TRUE, NA),
+         measure = ifelse(series %in% LEVEL_SERIES, "level", NA_character_))
 write_json(series_summary, "series_summary.json")
 
 geo_rows <- series_summary[series_summary$geo_level != "National", , drop = FALSE]
@@ -158,8 +175,11 @@ plot_rows <- function(d) {
              period_sort = d$period_sort, value = d$value)
 }
 
-data_through <- dbGetQuery(con, "
-  SELECT max(period_year * 100 + period_month) AS ym FROM series_facts WHERE period_type = 'month'")$ym
+# The rounds of invitations are updated after every draw, so they'd move
+# the date past the IRCC tables' own.
+data_through <- dbGetQuery(con, sprintf("
+  SELECT max(period_year * 100 + period_month) AS ym FROM series_facts
+  WHERE period_type = 'month' AND NOT contains(source_table_id, '%s')", EE_ROUNDS))$ym
 
 #' One National, Annual, absolute view of `series` at its default facet -
 #' exactly what the explorer plots for those inputs (I() keeps length-1
@@ -197,7 +217,8 @@ for (theme in unique(series_summary$theme)) {
 LANDING_SERIES <- c(
   study_permit_holders = "All permits (Year became effective)",
   tr_to_pr_transition  = "Prior study permit",
-  refugees             = "Outcome"
+  refugees             = "Outcome",
+  express_entry        = "Invitations issued"
 )
 
 # ---- landing cards ----------------------------------------------------------
@@ -256,7 +277,12 @@ statcan_sources <- if (file.exists("app/data/statcan_sources.csv")) {
 pre2015_sources <- if (file.exists("app/data/pre2015_sources.csv")) {
   readr::read_csv("app/data/pre2015_sources.csv", show_col_types = FALSE, col_types = readr::cols(last_modified_ckan = "c"))
 } else NULL
-n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n + NROW(statcan_sources) + NROW(pre2015_sources)
+# Nor the Express Entry rounds of invitations (data-raw/09d_add_ee_rounds.R).
+canada_ca_sources <- if (file.exists("app/data/canada_ca_sources.csv")) {
+  readr::read_csv("app/data/canada_ca_sources.csv", show_col_types = FALSE, col_types = readr::cols(.default = "c"))
+} else NULL
+n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n + NROW(statcan_sources) +
+  NROW(pre2015_sources) + NROW(canada_ca_sources)
 for (lang in c("en", "fr")) {
   src <- if (lang == "en") "app/ABOUT.md" else "app/ABOUT_fr.md"
   md <- gsub("{{N_TABLES}}", n_tables, paste(readLines(src, warn = FALSE), collapse = "\n"), fixed = TRUE)
@@ -265,14 +291,18 @@ for (lang in c("en", "fr")) {
 
 manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types = FALSE,
                                 col_types = readr::cols(last_modified_ckan = "c"))
-# `portal` picks the citation wording: Open Government Portal (IRCC/IRB) or Statistics Canada.
+# `portal` picks the citation wording: Open Government Portal (IRCC/IRB),
+# Statistics Canada, or a canada.ca page's own data file.
 sources <- bind_rows(
   build_source_lookup(bind_rows(manifest_csv, pre2015_sources)) |>
     mutate(portal = "open_canada",
            historical = ifelse(hash %in% substr(pre2015_sources$resource_id, 1, 8), TRUE, NA)),
   if (!is.null(statcan_sources)) statcan_sources |>
     transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "statcan",
-              agency_fr, table_name_fr, dataset_url_fr)
+              agency_fr, table_name_fr, dataset_url_fr),
+  if (!is.null(canada_ca_sources)) canada_ca_sources |>
+    transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "canada_ca",
+              agency_fr, table_name_fr, dataset_url_fr, url_fr)
 )
 write_json(sources, "sources.json")
 

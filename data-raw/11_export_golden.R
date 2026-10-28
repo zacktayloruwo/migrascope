@@ -30,6 +30,10 @@ unlink(OUT_DIR, recursive = TRUE)
 dir.create(OUT_DIR, recursive = TRUE)
 
 series_summary <- build_series_summary(con)
+# The Express Entry CRS cutoff is a score the web app rolls up by its lowest
+# value and draws as lines (series_summary.measure = "level", data-raw/10);
+# the R app only sums, so there's nothing to compare. web/tests cover it.
+series_summary <- series_summary[series_summary$series != "CRS score of lowest-ranked candidate invited", , drop = FALSE]
 
 #' One case: the explorer's inputs, exactly as app.R passes them to
 #' build_series_plot_data().

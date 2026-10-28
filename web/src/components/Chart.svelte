@@ -4,17 +4,20 @@
   // each bar, the last (largest, then Other / NA / Suppressed Residual) at the
   // bottom.
   import * as echarts from 'echarts/core'
-  import { BarChart, ScatterChart } from 'echarts/charts'
+  import { BarChart, LineChart, ScatterChart } from 'echarts/charts'
   import { AriaComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
   import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
   import type { PlotData } from '../query/plotData'
   import { formatNumber, formatPercent, type I18n, type Lang } from '../lib/i18n'
   import { NA_LABEL, OTHER, SUPPRESSED_RESIDUAL } from '../query/constants'
 
-  echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer, CanvasRenderer])
+  echarts.use([BarChart, LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, AriaComponent, SVGRenderer, CanvasRenderer])
 
-  let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel }: {
-    data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean
+  // `line`: a level series (e.g. the Express Entry CRS cutoff) - one line per
+  // category, not stacked bars, and no total in the tooltip.
+  let { data, lang, i18n, granularity, percent, partial = [], hidden = $bindable(new Set<string>()), nullLabel,
+        line = false }: {
+    data: PlotData; lang: Lang; i18n: I18n; granularity: string; percent: boolean; line?: boolean
     /** Period labels with incomplete data (e.g. "2026"): marked with an asterisk above the bar. */
     partial?: string[]
     /** Display names of categories switched off in the legend (bindable, so the CSV export can skip them). */
@@ -119,7 +122,7 @@
         ? { left: 0, right: 8, top: 36, bottom: legend.single ? 0 : 64, containLabel: true }
         : { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
       tooltip: forImage ? undefined : {
-        trigger: 'axis', axisPointer: { type: 'shadow' }, confine: true,
+        trigger: 'axis', axisPointer: { type: line ? 'line' : 'shadow' }, confine: true,
         formatter: (items: { seriesName: string; value: number | null; color: string; axisValueLabel: string }[]) => {
           const shown = items.filter((p) => p.seriesName !== PARTIAL_MARKER && p.value != null && p.value !== 0).reverse()
           const total = shown.reduce((a, p) => a + (p.value ?? 0), 0)
@@ -130,7 +133,7 @@
           const period = items[0]?.axisValueLabel ?? ''
           const head = `<div style="font-weight:700;margin-bottom:4px">${escapeHtml(period)}` +
             (partialSet.has(period) ? ` <span style="font-weight:400">(${partialLabel})</span>` : '') +
-            (shown.length > 1 && !percent ? ` · ${fmt(total)}` : '') + '</div>'
+            (shown.length > 1 && !percent && !line ? ` · ${fmt(total)}` : '') + '</div>'
           return head + lines.join('')
         }
       },
@@ -163,13 +166,17 @@
                       quarterOf(prev) !== quarterOf(cur), { color: '#D3D8DF', width: 1 })
       ],
       yAxis: {
-        type: 'value', max: percent ? 100 : undefined,
+        // scores sit far from zero (CRS 300-800), so a line's axis fits its data
+        type: 'value', max: percent ? 100 : undefined, scale: line,
         axisLabel: { color: '#3A4558', fontSize, formatter: (v: number) => (percent ? `${v}%` : formatNumber(v, lang)) },
         splitLine: { lineStyle: { color: '#E6EAEE' } }
       },
       series: [...stackOrder.map((c) => ({
         name: name(c),
-        type: 'bar', stack: 'total', barMaxWidth: forImage ? 96 : 48,
+        ...(line
+          ? { type: 'line', connectNulls: true, symbol: 'circle', symbolSize: forImage ? 10 : 6,
+              lineStyle: { width: forImage ? 3 : 2 } }
+          : { type: 'bar', stack: 'total', barMaxWidth: forImage ? 96 : 48 }),
         emphasis: { focus: 'series' },
         data: values.get(c),
         itemStyle: {
@@ -187,8 +194,9 @@
         name: PARTIAL_MARKER, type: 'scatter', silent: true, z: 10, symbolSize: 0,
         data: periodOrder.flatMap((period, i) => {
           if (!partialSet.has(period)) return []
-          const top = stackOrder.filter((c) => !hidden.has(name(c)))
-            .reduce((sum, c) => sum + Math.max(0, values.get(c)![i] ?? 0), 0)
+          const shown = stackOrder.filter((c) => !hidden.has(name(c))).map((c) => values.get(c)![i] ?? 0)
+          // above the bar's stack, or above the highest line
+          const top = line ? Math.max(0, ...shown) : shown.reduce((sum, v) => sum + Math.max(0, v), 0)
           return [[i, top]]
         }),
         label: { show: true, position: 'top', distance: 2, formatter: '*', fontSize: forImage ? 32 : 20, fontWeight: 700, color: '#14213D' }

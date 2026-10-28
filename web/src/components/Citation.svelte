@@ -20,17 +20,20 @@
   })
   const agency = $derived([...new Set(rows.map((r) => r.agency))].join(' / '))
   const datasetUrls = $derived([...new Set(rows.map((r) => r.dataset_url))])
-  const statcan = $derived(rows[0]?.portal === 'statcan')
+  // Open Government Portal files cite the portal; a Statistics Canada table or
+  // a canada.ca page's data file cites its own page.
+  const portal = $derived(rows[0]?.portal ?? 'open_canada')
+  const pageLabel = $derived(portal === 'statcan' ? 'citation_table_page' : portal === 'canada_ca' ? 'citation_web_page' : 'citation_dataset_page')
   const today = new Date().toISOString().slice(0, 10)
 </script>
 
 {#if rows.length}
   <p class="citation">
-    {i18n.t('citation_source', lang)}{agency}{i18n.t(statcan ? 'citation_portal_statcan' : 'citation_portal', lang)}
+    {i18n.t('citation_source', lang)}{agency}{i18n.t(portal === 'open_canada' ? 'citation_portal' : 'citation_portal_statcan', lang)}
     {#each rows as r, i (r.hash)}
       <a href={r.url} target="_blank" rel="noopener">“{r.table_name}” ({r.format})</a>{i18n.t('citation_last_updated', lang, r.updated_at)}{i < rows.length - 1 ? '; ' : ''}
     {/each}
-    ({#each datasetUrls as url, i (url)}<a href={url} target="_blank" rel="noopener">{i18n.t(statcan ? 'citation_table_page' : 'citation_dataset_page', lang)}{datasetUrls.length > 1 ? ` ${i + 1}` : ''}</a>{i < datasetUrls.length - 1 ? ', ' : ''}{/each}).
+    ({#each datasetUrls as url, i (url)}<a href={url} target="_blank" rel="noopener">{i18n.t(pageLabel, lang)}{datasetUrls.length > 1 ? ` ${i + 1}` : ''}</a>{i < datasetUrls.length - 1 ? ', ' : ''}{/each}).
     {i18n.t('citation_last_accessed', lang, today)}
   </p>
 {/if}

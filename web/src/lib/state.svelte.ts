@@ -115,7 +115,7 @@ export class Explorer {
   ])
 
   /** Percentage of a single unbroken bar is always 100% (app.R: setPercentAllowed). */
-  percentAllowed = $derived(!(this.scope?.facet === 'Total' &&
+  percentAllowed = $derived(this.scope?.measure !== 'level' && !(this.scope?.facet === 'Total' &&
     (this.geoLevel === 'national' || this.geoUnit !== 'All')))
 
   partitionKey = $derived(this.scope ? `${this.theme}/${this.scope.geo_level}` : '')
@@ -150,7 +150,8 @@ export class Explorer {
       years: this.plotYears, isStock: s.is_stock, topN: this.topN,
       displayAs: this.percentAllowed ? this.displayAs : 'absolute',
       geoUnitPrefix: this.geoLevel !== 'national' && this.geoUnit !== 'All' ? this.geoUnit.split(GEO_UNIT_SEP) : [],
-      drill1, drill2
+      drill1, drill2,
+      level: s.measure === 'level', events: !!s.events
     }
   })
 

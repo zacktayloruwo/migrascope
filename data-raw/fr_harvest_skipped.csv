@@ -1,36 +1,75 @@
 table_id,reason
+asylum_claimants/450f7e37__canada_asylum_claimants_by_claim_office_type_province_territ,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+asylum_claimants/a1829701__canada_asylum_claimants_by_province_territory_of_claim_recei,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+asylum_claimants/46bee0ae__canada_asylum_claimants_by_province_territory_of_claim_age_a,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+asylum_claimants/34c502f9__canada_asylum_claimants_by_province_territory_of_claim_gende,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 asylum_claimants/63f3ba24__canada_asylum_claimants_by_top_25_countries_of_citizenship_i,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+asylum_claimants/e4697ed2__canada_asylum_claimants_by_top_25_countries_of_citizenship_i,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 asylum_claimants/a18fc8e4__canada_asylum_claimants_by_top_25_countries_of_citizenship_i,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+asylum_claimants/efa9fd74__canada_asylum_claimants_by_top_25_countries_of_citizenship_i,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_ita/9f12b295__canada_express_entry_candidates_by_province_territory_invita,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_ita/d045b65d__canada_express_entry_candidates_by_province_territory_invita,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_ita/9741609d__canada_express_entry_candidates_by_province_territory_invita,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_ita/0dfa3675__canada_express_entry_candidates_by_province_territory_invita,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_ita/Canada - Express Entry Candidates under Canadian Experience Class Invitation Category by Province/Territory and Occupation,no FR resource found on CKAN
+express_entry_ita/Canada - Express Entry Candidates under Federal Skilled Trades Invitation Category by Province/Territory and Occupation,no FR resource found on CKAN
+express_entry_pr/9a2dee6b__canada_permanent_residents_under_express_entry_by_province_t,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_pr/287b23d1__canada_permanent_residents_under_express_entry_by_province_t,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+express_entry_pr/88e63879__canada_permanent_residents_under_express_entry_by_province_t,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/840a3387__canada_adoptions_via_permanent_residence_fc6_fc9_by_country_,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/0f1e6cce__canada_permanent_residents_by_country_of_citizenship_and_imm,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/2aa5b7eb__canada_permanent_residents_by_province_territory_and_age_gro,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/81021dfd__canada_permanent_residents_by_province_territory_and_census_,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/ad5ccc07__canada_permanent_residents_by_province_territory_and_gender,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/5582034d__canada_permanent_residents_by_province_territory_and_immigra,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/5a3ec9ec__canada_permanent_residents_by_province_territory_and_intende,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/1a8171dc__canada_permanent_residents_by_province_territory_census_divi,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/a57b1d07__canada_ex_qc_french_speaking_permanent_residents_by_country_,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/f72b7082__canada_ex_qc_french_speaking_permanent_residents_by_immigrat,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/2bd7ddf5__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt_age,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/2bd7ddf5__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/2bd7ddf5__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_age,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/d034c26c__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt_cma,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/d034c26c__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/d034c26c__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_cma,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/f257263f__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt_gender,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/f257263f__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/f257263f__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_gender,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt_immcat,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_pt,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_immcat,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_immcat_g,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+permanent_residents/d839c522__canada_ex_qc_french_speaking_permanent_residents_by_province__pr_immcat_m,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/0d2c1908__canada_ex_qc_percentage_of_french_speaking_permanent_residen,could not parse EN or FR sheet
 permanent_residents/d1c1f4f3__canada_permanent_residents_by_country_of_citizenship,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/2d5c04fe__quebec_english_speaking_permanent_residents_by_immigration_c,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 permanent_residents/08cde424__quebec_percentage_of_english_speaking_permanent_residents_by,could not parse EN or FR sheet
 study_permit_holders/77b26dc4__canada_post_secondary_by_p_t_of_designated_learning_institut,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 study_permit_holders/f49cfb41__canada_post_secondary_by_p_t_of_designated_learning_institut,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+study_permit_holders/49417e55__canada_post_secondary_by_p_t_of_designated_learning_institut,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 study_permit_holders/b505b9bc__canada_study_permit_holders_by_country_of_citizenship_and_ye,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 study_permit_holders/Canada - Study permit holders by province/territory of intended destination and census metropolitan area (CMA),no FR resource found on CKAN
 "study_permit_holders/Canada - Study permit holders by province/territory of intended destination, study level and calendar year",no FR resource found on CKAN
 "study_permit_holders/Canada - Study permit holders by province/territory of intended destination, study level and year in which permit(s) became effective",no FR resource found on CKAN
+study_permit_holders/a26ab6fd__canada_study_permit_holders_by_province_territory_gender_and,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 study_permit_holders/3897ef92__canada_study_permit_holders_on_december_31st_by_country_of_c,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 study_permit_holders/Canada - Study permit holders with a valid permit by province/territory of intended destination and country of citizenship,no FR resource found on CKAN
+study_permit_holders/d3702eb4__canada_study_permit_holders_by_province_territory_study_leve,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 "temporary_workers/Canada - International Mobility Program (IMP) work permit holders under post-graduate employment by province/territory, Census Division and Census Subdivision of the Intended Destination and year in which permit(s) became effective",no FR resource found on CKAN
 temporary_workers/Canada - International Mobility Program work permit holders (work purpose only) on December 31st by province/territory and program,no FR resource found on CKAN
 temporary_workers/fe307c5c__canada_international_mobility_program_work_permit_holders_by,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+temporary_workers/cd45aa67__canada_international_mobility_program_work_permit_holders_by,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 "temporary_workers/Canada - International Mobility Program work permit holders by province/territory, program and year in which permit(s) became effective",no FR resource found on CKAN
 temporary_workers/880e786d__canada_temporary_foreign_worker_program_work_permit_holders_,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/4ff7924d__canada_temporary_foreign_worker_program_work_permit_holders_/TR - TFWP NOC,FR workbook has fewer sheets
 temporary_workers/9b20b866__canada_temporary_foreign_worker_program_work_permit_holders_/TR - TFWP Program,FR workbook has fewer sheets
 temporary_workers/7257ea58__canada_work_permit_holders_for_humanitarian_compassionate_pu,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+temporary_workers/08d3441d__canada_work_permit_holders_for_humanitarian_compassionate_pu,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
+temporary_workers/cb381f64__canada_work_permit_holders_for_humanitarian_and_compassionat,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/3989b766__canada_all_international_mobility_program_imp_work_permit_ho,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/821a942c__canada_international_mobility_program_imp_work_permit_holder,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/f2696d77__canada_international_mobility_program_work_permit_holders_by/TR - IMP CITZ,FR workbook has fewer sheets
+temporary_workers/66f66dec__canada_international_mobility_program_work_permit_holders_un,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/bed6c44f__canada_temporary_foreign_worker_program_tfwp_work_permit_hol,EN/FR row shape or value mismatch (structure and/or per-row values disagree)
 temporary_workers/2e910f7d__canada_temporary_foreign_worker_program_work_permit_holders_/TR - TFWP CITZ,FR workbook has fewer sheets
 tr_to_pr_transition/Canada –  Permanent Residents with Prior Study Permit Holder Status by Province/Territory  and Immigration Category,no FR resource found on CKAN

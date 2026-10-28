@@ -73,9 +73,14 @@ results <- purrr::pmap(ok_tables |> select(dataset, slug), function(dataset, slu
   })
 }, .progress = "Normalizing")
 
+# Datasets shown as one theme: the IRB's two refugee tables, and IRCC's
+# Express Entry invited candidates and admissions (their table_ids keep the
+# original prefix).
+THEME_OF_DATASET <- c(rpd_decisions = "refugees", rpd_1997_2021 = "refugees",
+                      express_entry_ita = "express_entry", express_entry_pr = "express_entry")
 results <- lapply(results, function(r) {
-  if (!is.null(r) && r$catalog_row$dataset %in% c("rpd_decisions", "rpd_1997_2021")) {
-    r$catalog_row$dataset <- "refugees"
+  if (!is.null(r) && r$catalog_row$dataset %in% names(THEME_OF_DATASET)) {
+    r$catalog_row$dataset <- unname(THEME_OF_DATASET[r$catalog_row$dataset])
   }
   r
 })

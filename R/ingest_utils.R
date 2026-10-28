@@ -9,7 +9,10 @@ ircc_datasets <- c(
   asylum_claimants     = "b6cbcf4d-f763-4924-a2fb-8cc4a06e3de4",
   study_permit_holders = "90115b00-f9b8-49e8-afa3-b4cff8facaee",
   tr_to_pr_transition  = "1b026aab-edb3-4d5d-8231-270a09ed4e82",
-  permanent_residents  = "f7e5498e-0ad8-4417-85c9-9b8aff9b9eda"
+  permanent_residents  = "f7e5498e-0ad8-4417-85c9-9b8aff9b9eda",
+  # Both relabelled to one express_entry theme in 05_build_duckdb.R
+  express_entry_ita    = "593e9165-c6ce-4f9b-b519-03d315f92cd4",
+  express_entry_pr     = "52e4b14b-597a-4ecf-a184-23a6e69b0d57"
 )
 
 #' Immigration and Refugee Board (IRB) datasets tracked by this pipeline.

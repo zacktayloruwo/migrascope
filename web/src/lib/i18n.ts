@@ -14,7 +14,8 @@ export const THEMES: { id: string; en: string; fr: string }[] = [
   { id: 'tr_to_pr_transition', en: 'TR → PR Transition', fr: 'Transition de résident temporaire à résident permanent' },
   { id: 'asylum_claimants', en: 'Asylum Claimants', fr: "Demandeurs d'asile" },
   { id: 'refugees', en: 'Refugees', fr: 'Réfugiés' },
-  { id: 'npr_population', en: 'Non-Permanent Resident Population', fr: 'Population de résidents non permanents' }
+  { id: 'npr_population', en: 'Non-Permanent Resident Population', fr: 'Population de résidents non permanents' },
+  { id: 'express_entry', en: 'Express Entry', fr: 'Entrée express' }
 ]
 
 export function themeLabel(id: string, lang: Lang): string {

@@ -41,7 +41,8 @@ DATASET_LABELS <- c(
   study_permit_holders   = "Study Permit Holders",
   tr_to_pr_transition    = "TR → PR Transition",
   asylum_claimants       = "Asylum Claimants",
-  refugees               = "Refugees"
+  refugees               = "Refugees",
+  express_entry          = "Express Entry"
 )
 GEO_RANK_LABELS <- c(PT = "Province/Territory", CMA = "CMA", CD = "CD", CSD = "CSD")
 
