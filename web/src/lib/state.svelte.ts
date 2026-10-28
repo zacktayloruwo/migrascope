@@ -13,7 +13,7 @@
 
 import type { SeriesFactsColumns } from '../query/columns'
 import { GEO_UNIT_SEP } from '../query/constants'
-import { buildPlotData, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
+import { buildPlotData, isScoreRangeView, orderScoreRanges, orderWestToEast, sourceTableIds, type Granularity, type PlotData,
          type ViewParams } from '../query/plotData'
 import { partialPeriods, type PartialPeriod } from '../query/partial'
 import { drillableValues } from '../query/drill'
@@ -161,7 +161,9 @@ export class Explorer {
 
   plotData = $derived.by((): PlotData | null => {
     const data = this.colsReady && this.params ? buildPlotData(this.cols!, this.params) : this.pendingDefault()
-    return data && this.isProvinceView ? orderWestToEast(data) : data
+    if (!data) return data
+    if (this.isProvinceView) return orderWestToEast(data)
+    return isScoreRangeView(data) ? orderScoreRanges(data) : data
   })
 
   /** The theme's pre-aggregated view, if the current inputs are exactly the ones it was built for. */

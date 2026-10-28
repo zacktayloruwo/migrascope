@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest'
 import type { SeriesFactsColumns } from '../src/query/columns'
 import { partialPeriods } from '../src/query/partial'
-import { buildPlotData, type ViewParams } from '../src/query/plotData'
+import { buildPlotData, isScoreRangeView, orderScoreRanges, type ViewParams } from '../src/query/plotData'
 
 /** Columns from [category, year, month, value] rows of one National series. */
 function columns(rows: [string, number, number, number][], series = 'S', facet = 'Round Type'): SeriesFactsColumns {
@@ -76,5 +76,26 @@ describe('event series: only the latest period can be partial', () => {
 
   test('without the flag, gaps between draws would mark years partial', () => {
     expect(partialPeriods(cols, params({}), '2026-07').map((x) => x.period)).toEqual(['2025', '2026'])
+  })
+})
+
+describe('CRS score ranges stack lowest at the bottom', () => {
+  const data = (categoryOrder: string[]) => ({ categoryOrder, periodOrder: [], rows: [] })
+
+  test('pool ranges: highest first in categoryOrder (top of the stack)', () => {
+    const d = data(['451-500', '401-450', '351-400', '501-600', '0-300', '601-1200', '301-350'])
+    expect(isScoreRangeView(d)).toBe(true)
+    expect(orderScoreRanges(d).categoryOrder).toEqual(['601-1200', '501-600', '451-500', '401-450', '351-400', '301-350', '0-300'])
+  })
+
+  test('"Score 251 - 300" labels, with "Other" and the residual kept after them', () => {
+    const d = data(['Score 451 - 500', 'Score 1001 - 1100', 'Score 251 - 300', 'Other', 'Suppressed Residual'])
+    expect(isScoreRangeView(d)).toBe(true)
+    expect(orderScoreRanges(d).categoryOrder).toEqual(['Score 1001 - 1100', 'Score 451 - 500', 'Score 251 - 300', 'Other', 'Suppressed Residual'])
+  })
+
+  test('other views are left alone', () => {
+    expect(isScoreRangeView(data(['15 to 29 years old', '0 to 14 years old']))).toBe(false)
+    expect(isScoreRangeView(data(['Canadian Experience Class', '451-500']))).toBe(false)
   })
 })

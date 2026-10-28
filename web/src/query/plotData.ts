@@ -376,6 +376,28 @@ export function orderWestToEast(data: PlotData): PlotData {
   return { ...data, categoryOrder: [...provinces, ...rest] }
 }
 
+/** A score range label: "451-500" (Express Entry pool) or "Score 451 - 500" (invited candidates). */
+const SCORE_RANGE_REGEX = /^(?:Score\s+)?(\d+)\s*-\s*\d+$/
+
+/** True when every category but "Other"/NA/Suppressed Residual is a score range. */
+export function isScoreRangeView(data: PlotData): boolean {
+  const named = data.categoryOrder.filter((c) => ![OTHER, NA_LABEL, SUPPRESSED_RESIDUAL].includes(c))
+  return named.length > 0 && named.every((c) => SCORE_RANGE_REGEX.test(c))
+}
+
+/**
+ * Express Entry CRS score ranges stacked lowest at the bottom, highest at the
+ * top (categoryOrder runs from the top of the stack down, as the legend
+ * does), instead of by size. Other categories keep their place after them.
+ * Web-only, like orderWestToEast().
+ */
+export function orderScoreRanges(data: PlotData): PlotData {
+  const low = (c: string) => Number(SCORE_RANGE_REGEX.exec(c)![1])
+  const ranges = data.categoryOrder.filter((c) => SCORE_RANGE_REGEX.test(c)).sort((a, b) => low(b) - low(a))
+  const rest = data.categoryOrder.filter((c) => !SCORE_RANGE_REGEX.test(c))
+  return { ...data, categoryOrder: [...ranges, ...rest] }
+}
+
 // ---- list_series_breakdown_values() --------------------------------------------------
 
 /** Drill-down choices: distinct breakdown_1 values, or breakdown_2 values under one breakdown_1. */
