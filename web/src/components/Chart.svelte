@@ -95,6 +95,17 @@
     hidden = next
   }
 
+  // The tooltip lists every category for the period under the pointer and
+  // highlights the one the pointer is on. ECharts' axis tooltip doesn't say
+  // which series that is, so it's worked out from the pointer's position:
+  // the stack segment it's inside (bars), or the nearest dot within a few
+  // pixels (dots). `activeAt` is set by the on-screen option.
+  let pointer: [number, number] | null = null
+  let activeAt: ((i: number) => string | null) | null = null
+  /** Period index and category the tooltip last showed, to re-show it when the pointer changes category. */
+  let shownIndex: number | null = null
+  let shownActive: string | null = null
+
   /**
    * The chart's ECharts option. `forImage` is the slide export (renderImage):
    * no animation or tooltip, larger text, and ECharts' own legend in place of
@@ -133,6 +144,34 @@
     const dotSize = (draws ? Math.max(4, Math.min(10, Math.round(2400 / Math.max(1, periodOrder.length)))) : 10) *
       (forImage ? 1.6 : 1)
     const drawBarWidth = Math.max(1, Math.min(forImage ? 24 : 12, Math.floor((forImage ? 1600 : 800) / (periodOrder.length * 1.6))))
+    if (!forImage) {
+      activeAt = (i: number) => {
+        if (!chart || !pointer) return null
+        const toValue = (y: number) => (chart!.convertFromPixel({ gridIndex: 0 }, [pointer![0], y]) as number[])[1]
+        const y = toValue(pointer[1])
+        const shown = stackOrder.filter((c) => !hidden.has(name(c)))
+        if (mode === 'bars') {
+          let base = 0
+          for (const c of shown) {
+            const v = values.get(c)![i] ?? 0
+            if (v <= 0) continue
+            if (y >= base && y < base + v) return c
+            base += v
+          }
+          return null
+        }
+        // dots: the nearest within 12px
+        const tolerance = Math.abs(toValue(pointer[1] + 12) - y)
+        let best: string | null = null
+        let gap = tolerance
+        for (const c of shown) {
+          const v = values.get(c)![i]
+          if (v == null) continue
+          if (Math.abs(v - y) <= gap) { gap = Math.abs(v - y); best = c }
+        }
+        return best
+      }
+    }
     const longDate = (iso: string) => new Intl.DateTimeFormat(lang === 'fr' ? 'fr-CA' : 'en-CA',
       { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(iso))
 
@@ -146,13 +185,22 @@
         : { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
       tooltip: forImage ? undefined : {
         trigger: 'axis', axisPointer: { type: draws || dots ? 'line' : 'shadow' }, confine: true,
-        formatter: (items: { seriesName: string; value: number | null; color: string; axisValueLabel: string }[]) => {
+        formatter: (items: { seriesName: string; value: number | null; color: string; axisValueLabel: string; dataIndex: number }[]) => {
+          const index = items[0]?.dataIndex ?? null
+          const active = index != null && activeAt ? activeAt(index) : null
+          shownIndex = index
+          shownActive = active
+          const activeName = active == null ? null : name(active)
+          const row = (seriesName: string, color: string, value: number) => {
+            const on = seriesName === activeName
+            return `<div style="display:flex;justify-content:space-between;gap:16px;border-radius:3px;margin:0 -4px;padding:0 4px` +
+              (on ? ';background:#E4EAFB;font-weight:700' : '') + `"><span>` +
+              `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};margin-right:6px"></span>` +
+              `${escapeHtml(seriesName)}</span><strong>${fmt(value)}</strong></div>`
+          }
           const shown = items.filter((p) => p.seriesName !== PARTIAL_MARKER && p.value != null && p.value !== 0).reverse()
           const total = shown.reduce((a, p) => a + (p.value ?? 0), 0)
-          const lines = shown.map((p) =>
-            `<div style="display:flex;justify-content:space-between;gap:16px"><span>` +
-            `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:6px"></span>` +
-            `${escapeHtml(p.seriesName)}</span><strong>${fmt(p.value ?? 0)}</strong></div>`)
+          const lines = shown.map((p) => row(p.seriesName, p.color, p.value ?? 0))
           if (draws) {
             // every draw on the hovered date (two were held on one day in 2018), then the values
             const periods = [...new Set(items.map((p) => (p as unknown as { data: { period: string } }).data?.period).filter(Boolean))]
@@ -168,12 +216,8 @@
               return v != null && v !== 0
             }).reverse()
             const total = values.reduce((a, p) => a + ((p as unknown as { data: { value: [number, number] } }).data.value[1]), 0)
-            return head + values.map((p) => {
-              const v = (p as unknown as { data: { value: [number, number] } }).data.value[1]
-              return `<div style="display:flex;justify-content:space-between;gap:16px"><span>` +
-                `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:6px"></span>` +
-                `${escapeHtml(p.seriesName)}</span><strong>${fmt(v)}</strong></div>`
-            }).join('') + (values.length > 1 && !percent && !line ? `<div style="text-align:right">${fmt(total)}</div>` : '')
+            return head + values.map((p) =>
+              row(p.seriesName, p.color, (p as unknown as { data: { value: [number, number] } }).data.value[1])).join('') + (values.length > 1 && !percent && !line ? `<div style="text-align:right">${fmt(total)}</div>` : '')
           }
           const period = items[0]?.axisValueLabel ?? ''
           const head = `<div style="font-weight:700;margin-bottom:4px">${escapeHtml(period)}` +
@@ -279,6 +323,16 @@
 
   $effect(() => {
     chart = echarts.init(el, undefined, { renderer: 'svg' })
+    // Moving within one period doesn't re-run the tooltip's formatter, so
+    // re-show the tip when the pointer moves onto another category.
+    const zr = chart.getZr()
+    zr.on('mousemove', (e: { offsetX: number; offsetY: number }) => {
+      pointer = [e.offsetX, e.offsetY]
+      if (shownIndex == null || !activeAt || activeAt(shownIndex) === shownActive) return
+      chart?.dispatchAction({ type: 'hideTip' })
+      chart?.dispatchAction({ type: 'showTip', x: e.offsetX, y: e.offsetY })
+    })
+    zr.on('globalout', () => { pointer = null; shownIndex = null })
     const ro = new ResizeObserver(() => chart?.resize())
     ro.observe(el)
     return () => { ro.disconnect(); chart?.dispose(); chart = undefined }
