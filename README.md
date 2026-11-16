@@ -69,6 +69,8 @@ Immigration and Refugee Board (IRB) datasets (`R/ingest_utils.R`, `irb_datasets`
 
 12. **`data-raw/09d_add_ee_rounds.R`** — adds IRCC's Express Entry rounds of invitations to the `express_entry` theme from the data file behind canada.ca's [Rounds of invitations](https://www.canada.ca/en/immigration-refugees-citizenship/services/immigrate-canada/express-entry/rounds-invitations.html) page (`ee_rounds_123_en.json`/`_fr.json`, downloaded on every run): invitations issued and the CRS cutoff by round type, and the pool's CRS score distribution (from 2022, a stock). Raw round names are grouped into stable types by `ROUND_TYPES` (an unknown name stops the script). The web app plots these three draw by draw at each draw's date (`ee_draws`/`ee_draw_facts`, exported by `10` as `draws.json`; `series_summary.draws`), not by month, quarter or year; the monthly `series_facts` rows remain for the landing card and drill-down lists. The cutoff is a level, not a count (`measure = "level"`): drawn as lines and points, never stacked. Writes `app/data/canada_ca_sources.csv` for the citation. The theme's other series come from two IRCC datasets in `ircc_datasets` (`express_entry_ita`, `express_entry_pr`), relabelled to `express_entry` in `05`. Re-run after `08`/`09`.
 
+13. **`data-raw/09e_add_irb_claims.R`** — adds the Immigration and Refugee Board's [refugee claims statistics](https://www.irb-cisr.gc.ca/en/statistics/protection/Pages/index.aspx) to the `asylum_claimants` theme: one HTML table a year ("Claims by Country of Alleged Persecution", 2013 to the current year to date, English and French pages, downloaded on every run). It writes three annual series by country of alleged persecution - claims referred, claims finalized by decision (accepted, rejected, abandoned, withdrawn and other) and claims pending at year end (a stock) - which the IRB's open data (`rpd_decisions`, the Refugees theme) doesn't break down. It checks that the decisions add up to each row's finalized count and that countries don't exceed the published total; maps the IRB's changing country spellings onto the current one (`PLACE_NAMES`); pairs English and French country names by their figures, with `FR_EXTRA` for those too small to pair; and writes `app/data/irb_sources.csv`, cited with `portal = "irb"` (a web page, with the suppression note). Re-run after `08`/`09`; `10_export_web.R` stops if the rows are missing.
+
 Run from the project root:
 
 ``` r
@@ -84,6 +86,7 @@ source("data-raw/08_build_series_facts.R")
 source("data-raw/09b_add_statcan_npr.R")   # Statistics Canada non-permanent residents theme (re-run after 08/09)
 source("data-raw/09c_add_pre2015.R")       # permanent residents 2000-2014 (re-run after 08/09)
 source("data-raw/09d_add_ee_rounds.R")     # Express Entry rounds of invitations (re-run after 08/09)
+source("data-raw/09e_add_irb_claims.R")    # IRB claims referred, finalized and pending (re-run after 08/09)
 source("data-raw/10_export_web.R")         # Parquet + JSON for the static web app (web/), see docs/wasm-port-plan.md
 source("data-raw/11_export_golden.R")      # golden files for the web app's parity tests (cd web && npm test)
 ```

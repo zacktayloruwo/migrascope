@@ -21,9 +21,9 @@
   const agency = $derived([...new Set(rows.map((r) => r.agency))].join(' / '))
   const datasetUrls = $derived([...new Set(rows.map((r) => r.dataset_url))])
   // Open Government Portal files cite the portal; a Statistics Canada table or
-  // a canada.ca page's data file cites its own page.
+  // a canada.ca page's data file or the IRB's statistics pages cite their own page.
   const portal = $derived(rows[0]?.portal ?? 'open_canada')
-  const pageLabel = $derived(portal === 'statcan' ? 'citation_table_page' : portal === 'canada_ca' ? 'citation_web_page' : 'citation_dataset_page')
+  const pageLabel = $derived(portal === 'statcan' ? 'citation_table_page' : portal === 'canada_ca' || portal === 'irb' ? 'citation_web_page' : 'citation_dataset_page')
   const today = new Date().toISOString().slice(0, 10)
 </script>
 

@@ -70,6 +70,13 @@ SERIES_FACET_LABELS_FR <- c(
   "Candidates in the pool" = "Candidats dans le bassin",
   "CRS score of lowest-ranked candidate invited" = "Note obtenue dans le SCG par le candidat invité le moins bien classé",
   "Round Type" = "Type de ronde",
+  # IRB refugee claims statistics (data-raw/09e), in the IRB's own French wording.
+  "Claims referred to the IRB" = "Demandes d'asile déférées à la CISR",
+  "Claims finalized by the IRB" = "Demandes d'asile réglées par la CISR",
+  "Claims pending at the IRB (end of year)" = "Demandes d'asile en instance à la CISR (fin d'année)",
+  "Country of Alleged Persecution" = "Pays présenté comme pays de persécution",
+  "Decision" = "Décision",
+  "Decision and Country of Alleged Persecution" = "Décision et pays présenté comme pays de persécution",
   # Express Entry's IRCC tables (series names set in app/data/label_overrides.xlsx).
   "Invited candidates who applied" = "Candidats invités ayant présenté une demande",
   "Invited candidates who applied (Canadian Experience Class)" =

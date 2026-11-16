@@ -78,7 +78,7 @@
       .filter((s) => s !== undefined).map((s) => localizeSource(s, app!.lang))
   })
   /** IRCC/IRB's suppression note - Statistics Canada's estimates and the Express Entry draws aren't suppressed. */
-  const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => (s.portal ?? 'open_canada') === 'open_canada'))
+  const suppressed = $derived(!sourceTables.length || sourceTables.some((s) => ['open_canada', 'irb'].includes(s.portal ?? 'open_canada')))
   /** The view joins IRCC's pre-2015 extracts to the monthly tables (data-raw/09c). */
   const spliced = $derived(sourceTables.some((s) => s.historical))
 

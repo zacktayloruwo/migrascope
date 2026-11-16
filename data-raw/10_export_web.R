@@ -58,6 +58,11 @@ if (file.exists("app/data/canada_ca_sources.csv") &&
     dbGetQuery(con, sprintf("SELECT count(*) AS n FROM series_facts WHERE contains(source_table_id, '%s')", EE_ROUNDS))$n == 0) {
   stop("series_facts has no Express Entry rounds rows - run data-raw/09d_add_ee_rounds.R after 08/09")
 }
+# IRB refugee claims statistics (data-raw/09e), from the IRB's own web pages.
+if (file.exists("app/data/irb_sources.csv") &&
+    dbGetQuery(con, "SELECT count(*) AS n FROM series_facts WHERE contains(source_table_id, '/1eb00001__')")$n == 0) {
+  stop("series_facts has no IRB claims rows - run data-raw/09e_add_irb_claims.R after 08/09")
+}
 
 unlink(OUT_DIR, recursive = TRUE)
 dir.create(file.path(OUT_DIR, "views"), recursive = TRUE)
@@ -295,8 +300,12 @@ pre2015_sources <- if (file.exists("app/data/pre2015_sources.csv")) {
 canada_ca_sources <- if (file.exists("app/data/canada_ca_sources.csv")) {
   readr::read_csv("app/data/canada_ca_sources.csv", show_col_types = FALSE, col_types = readr::cols(.default = "c"))
 } else NULL
+# Nor the IRB's refugee claims statistics pages (data-raw/09e_add_irb_claims.R).
+irb_sources <- if (file.exists("app/data/irb_sources.csv")) {
+  readr::read_csv("app/data/irb_sources.csv", show_col_types = FALSE, col_types = readr::cols(.default = "c"))
+} else NULL
 n_tables <- dbGetQuery(con, "SELECT COUNT(*)::INTEGER AS n FROM catalog")$n + NROW(statcan_sources) +
-  NROW(pre2015_sources) + NROW(canada_ca_sources)
+  NROW(pre2015_sources) + NROW(canada_ca_sources) + NROW(irb_sources)
 for (lang in c("en", "fr")) {
   src <- if (lang == "en") "app/ABOUT.md" else "app/ABOUT_fr.md"
   md <- gsub("{{N_TABLES}}", n_tables, paste(readLines(src, warn = FALSE), collapse = "\n"), fixed = TRUE)
@@ -306,7 +315,9 @@ for (lang in c("en", "fr")) {
 manifest_csv <- readr::read_csv("app/data/source_manifest.csv", show_col_types = FALSE,
                                 col_types = readr::cols(last_modified_ckan = "c"))
 # `portal` picks the citation wording: Open Government Portal (IRCC/IRB),
-# Statistics Canada, or a canada.ca page's own data file.
+# Statistics Canada, a canada.ca page's own data file, or the IRB's own
+# statistics pages (cited like a canada.ca page, but suppressed like the
+# portal's IRB files).
 sources <- bind_rows(
   build_source_lookup(bind_rows(manifest_csv, pre2015_sources)) |>
     mutate(portal = "open_canada",
@@ -316,6 +327,9 @@ sources <- bind_rows(
               agency_fr, table_name_fr, dataset_url_fr),
   if (!is.null(canada_ca_sources)) canada_ca_sources |>
     transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "canada_ca",
+              agency_fr, table_name_fr, dataset_url_fr, url_fr),
+  if (!is.null(irb_sources)) irb_sources |>
+    transmute(hash, agency, table_name, format, url, dataset_url, updated_at, portal = "irb",
               agency_fr, table_name_fr, dataset_url_fr, url_fr)
 )
 write_json(sources, "sources.json")

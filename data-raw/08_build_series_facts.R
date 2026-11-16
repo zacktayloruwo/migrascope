@@ -538,6 +538,16 @@ unify_spellings <- function(sf, cols) {
 }
 series_facts <- unify_spellings(series_facts, c("geo_1", "geo_2", "geo_3", "breakdown_1", "breakdown_2", "breakdown_3"))
 
+# IRCC's "Other occupations" in the Intended Occupation tables is the
+# occupations too small to list, the same thing as the app's top-N
+# catch-all, so it is labelled "Other" and joins that bucket.
+occ <- startsWith(series_facts$facet, "Intended Occupation")
+for (col in c("breakdown_1", "breakdown_2", "breakdown_3")) {
+  hit <- occ & series_facts[[col]] %in% "Other occupations"
+  if (any(occ & series_facts[[col]] %in% "Other")) stop("an Intended Occupation table already has an 'Other' category in ", col)
+  series_facts[[col]][hit] <- "Other"
+}
+
 # Two sibling tables can report the same cell under different spellings
 # (e.g. 5582034d's "Province/Territory not stated" and 2aa5b7eb's
 # "Province/territory not stated"), which merge_max() couldn't match, so

@@ -532,10 +532,20 @@ build_refugees_table <- function(rpd_decisions_slug, rpd_1997_2021_slug) {
     "Refugees merge: {nrow(overlap_check)} year x outcome rows compared for {min(overlap_years)}-{max(overlap_years)} overlap, pct_diff range [{min(overlap_check$pct_diff)}, {max(overlap_check$pct_diff)}]% (see data-raw/refugees_merge_overlap_check.csv)"
   )
 
+  # Both sources are by place (country of persecution, province of
+  # residence) with no total row, so the national figure is their sum.
+  # Without this, every place's row became a copy of the same national
+  # cell and 08's max-merge kept only the largest place.
+  to_national <- function(d) {
+    d |>
+      dplyr::group_by(.data$outcome, dplyr::across(dplyr::all_of(period_meta_cols))) |>
+      dplyr::summarise(value = sum(.data$value, na.rm = TRUE), suppressed = FALSE, is_percent = FALSE,
+                       .groups = "drop")
+  }
   historical_max_year <- max(historical$period_year)
   combined <- dplyr::bind_rows(
-    historical,
-    recent |> dplyr::filter(.data$period_year > historical_max_year)
+    to_national(historical),
+    to_national(recent |> dplyr::filter(.data$period_year > historical_max_year))
   ) |>
     dplyr::mutate(is_row_subtotal = FALSE) |>
     dplyr::select("outcome", "value", "suppressed", "is_percent", dplyr::all_of(period_meta_cols), "is_row_subtotal")
